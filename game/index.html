@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOLMARA — Open City</title>
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1a24; font-family: 'Segoe UI', Arial, sans-serif; color: #fff; }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #hud { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  .panel { background: rgba(8, 16, 24, 0.72); border: 1px solid rgba(255,255,255,0.18); border-radius: 8px; padding: 8px 12px; }
+  #top-left { position: absolute; top: 12px; left: 12px; }
+  #health-fill { height: 10px; background: #37c978; border-radius: 4px; width: 100%; }
+  #health-bar { width: 180px; background: rgba(0,0,0,0.6); border-radius: 4px; padding: 2px; }
+  #stars-value { color: #ffd94d; font-size: 20px; letter-spacing: 2px; }
+  #cash-value { font-size: 20px; font-weight: bold; color: #7dff9a; }
+  #top-right { position: absolute; top: 12px; right: 12px; text-align: right; }
+  #minimap { width: 190px; height: 190px; border: 2px solid rgba(255,255,255,0.4); border-radius: 8px; background: #0e1a24; }
+  #objective { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; max-width: 520px; }
+  #objective-text { font-size: 15px; }
+  #bottom-right { position: absolute; bottom: 12px; right: 12px; text-align: right; }
+  #speed-value { font-size: 34px; font-weight: bold; }
+  #ammo-value { font-size: 20px; }
+  #feed { position: absolute; bottom: 12px; left: 12px; max-width: 420px; font-size: 14px; }
+  #feed div { background: rgba(8,16,24,0.7); border-radius: 4px; padding: 4px 8px; margin-top: 4px; }
+  #dialogue { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); background: rgba(8,16,24,0.85); padding: 10px 18px; border-radius: 8px; font-style: italic; max-width: 640px; text-align: center; transition: opacity 0.5s; }
+  #hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); font-size: 13px; opacity: 0.9; }
+  #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 6; opacity: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(200,0,0,0.55) 100%); }
+  #crosshair { display: none; position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); font-size: 22px; color: #fff; text-shadow: 0 0 4px #000; z-index: 5; pointer-events: none; }
+  .screen { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 10; background: linear-gradient(160deg, rgba(10,30,50,0.88), rgba(60,20,40,0.82)); text-align: center; padding: 20px; }
+  .screen h1 { font-size: 64px; margin: 0; letter-spacing: 10px; color: #ffd94d; text-shadow: 0 4px 0 #d84a4a, 0 8px 24px #000; }
+  .screen h2 { margin: 4px 0 16px; font-weight: 400; letter-spacing: 3px; opacity: 0.9; }
+  .screen button { pointer-events: auto; font-size: 17px; padding: 11px 26px; margin: 5px; border: none; border-radius: 8px; background: #ffd94d; color: #111; font-weight: bold; cursor: pointer; }
+  .screen button:hover { background: #ffe98a; }
+  .screen button.secondary { background: rgba(255,255,255,0.16); color: #fff; }
+  #mission-list { text-align: left; max-width: 620px; list-style: none; padding: 0; font-size: 14px; }
+  #mission-list li { margin: 8px 0; background: rgba(255,255,255,0.08); padding: 8px 12px; border-radius: 6px; }
+  #mission-list span { opacity: 0.8; }
+  .controls { font-size: 13px; opacity: 0.9; line-height: 1.7; margin-top: 10px; }
+</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three/three.module.min.js" } }</script>
+</head>
+<body>
+<canvas id="scene"></canvas>
+<div id="vignette"></div>
+<div id="crosshair">+</div>
+<div id="hud">
+  <div id="top-left" class="panel">
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div>Health <span id="health-value">100</span> &nbsp;·&nbsp; <span id="cash-value">$250</span></div>
+    <div id="stars-value">☆☆☆☆☆</div>
+    <div id="mission-value">Mission 1/5</div>
+  </div>
+  <div id="objective" class="panel"><b>OBJECTIVE</b><br><span id="objective-text">Press M to start your first mission.</span></div>
+  <div id="top-right" class="panel">
+    <div id="clock-value">10:30</div>
+    <canvas id="minimap" width="190" height="190"></canvas>
+  </div>
+  <div id="bottom-right" class="panel">
+    <div id="speed-box" style="display:none"><span id="speed-value">0</span> km/h</div>
+    <div><span id="weapon-value">Pistol</span> · <span id="ammo-value">12 / 48</span></div>
+  </div>
+  <div id="feed"></div>
+  <div id="dialogue" style="opacity:0"></div>
+  <div id="hint">WASD move · E enter car · M missions · Esc pause</div>
+</div>
+<div id="start-screen" class="screen" style="display:flex">
+  <h1>SOLMARA</h1>
+  <h2>OPEN CITY · A SUN-SOAKED CRIME STORY</h2>
+  <p>Dario Venn is out of lockup and back in Solmara. Fixer Mara Kessler has work.<br>The Hollow Point Syndicate owns the boardwalk. Take it back — one job at a time.</p>
+  <div>
+    <button id="btn-new">New Game</button>
+    <button id="btn-continue" class="secondary">Continue</button>
+    <button id="btn-missions" class="secondary">Missions</button>
+    <button id="btn-mute" class="secondary">Music: on</button>
+  </div>
+  <ul id="mission-list"></ul>
+  <div class="controls">WASD move · Mouse look · Shift sprint · Space jump / handbrake · E enter / steal car · Click shoot · R reload · F fists / pistol · M start mission · T taxi fare · G car delivery · Q save · Esc pause</div>
+</div>
+<div id="pause-screen" class="screen">
+  <h1 style="font-size:42px">PAUSED</h1>
+  <p>Solmara waits for no one — except right now.</p>
+  <div><button id="btn-resume">Resume</button><button id="btn-save" class="secondary">Save Game</button><button id="btn-quit" class="secondary">Save &amp; Quit to Menu</button></div>
+  <div class="controls">WASD move · Mouse look · Shift sprint · Space jump / handbrake · E enter / steal car · Click shoot · R reload · F fists / pistol · M mission · T taxi · G delivery · Q save</div>
+</div>
+<div id="busted-screen" class="screen">
+  <h1 id="busted-title" style="font-size:48px">BUSTED</h1>
+  <p id="busted-sub">The Solmara PD caught you.</p>
+  <div><button id="btn-busted">Wake Up at the Boardwalk</button></div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
