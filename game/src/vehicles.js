@@ -1,13 +1,15 @@
 // Cars: procedural models (body, cabin, wheels), distinct colours/handling,
 // enter/exit with E, driving physics, collisions, stealing raises wanted.
+// Top speeds are in game units per second; the HUD shows speed x3.6, so the
+// Marina GT's 48 u/s reads as ~173 km/h and the Interceptor's 52 as ~187.
 import * as THREE from 'three';
 export const CAR_DEFS = [
-  { name: 'Solmar Runner', color: 0xd84a4a, top: 24, accel: 15, max: 26, grip: 0.9 },
-  { name: 'Cortez Coupe', color: 0x2a6fd8, top: 32, accel: 17, max: 33, grip: 1.0 },
-  { name: 'Marina GT', color: 0xf0c040, top: 38, accel: 20, max: 40, grip: 1.1 },
-  { name: 'Palm Taxi', color: 0xf0e040, top: 27, accel: 14, max: 28, grip: 0.85, taxi: true },
-  { name: 'Dock Van', color: 0x7a8a99, top: 22, accel: 11, max: 23, grip: 0.7 },
-  { name: 'Interceptor', color: 0x1a1d22, top: 42, accel: 24, max: 44, grip: 1.2, police: true },
+  { name: 'Solmar Runner', color: 0xd84a4a, top: 30, accel: 15, max: 32, grip: 0.9 },
+  { name: 'Cortez Coupe', color: 0x2a6fd8, top: 38, accel: 17, max: 40, grip: 1.0 },
+  { name: 'Marina GT', color: 0xf0c040, top: 46, accel: 20, max: 48, grip: 1.1 },
+  { name: 'Palm Taxi', color: 0xf0e040, top: 32, accel: 14, max: 34, grip: 0.85, taxi: true },
+  { name: 'Dock Van', color: 0x7a8a99, top: 26, accel: 11, max: 28, grip: 0.7 },
+  { name: 'Interceptor', color: 0x1a1d22, top: 50, accel: 24, max: 52, grip: 1.2, police: true },
 ];
 export function buildCarMesh(def) {
   const g = new THREE.Group();
@@ -47,7 +49,7 @@ export function createVehicles(scene, world) {
     const mesh = buildCarMesh(def);
     mesh.position.set(s.x + (i % 3) * 6, 0, s.z + Math.floor(i / 3) * 4);
     mesh.rotation.y = s.yaw; scene.add(mesh);
-    cars.push({ def, mesh, x: mesh.position.x, z: mesh.position.z, yaw: s.yaw, speed: 0, occupied: false, traffic: false, parked: true, steer: 0 });
+    cars.push({ def, mesh, x: mesh.position.x, z: mesh.position.z, yaw: s.yaw, speed: 0, occupied: false, traffic: false, parked: true, steer: 0, tuned: false, plated: false, owned: false });
   }
   return {
     cars,
@@ -56,16 +58,27 @@ export function createVehicles(scene, world) {
       for (const c of cars) { const d = Math.hypot(c.x - x, c.z - z); if (d < bd) { bd = d; best = c; } }
       return best;
     },
+    // A car bought at Rico's Motors: parked near the player, owned, never
+    // raises wanted when entered.
+    spawnOwnedCar(def, x, z) {
+      if (!def) return null;
+      const mesh = buildCarMesh(def);
+      mesh.position.set(x, 0, z); scene.add(mesh);
+      const car = { def, mesh, x, z, yaw: 0, speed: 0, occupied: false, traffic: false, parked: true, steer: 0, tuned: false, plated: false, owned: true };
+      cars.push(car);
+      return car;
+    },
     // Arcade driving: accelerate/brake, steering scales down with speed, handbrake slides.
     drive(car, dt, input, world, effects, audio, onCrash) {
       const fwd = input.down ? 1 : 0, rev = input.back ? 1 : 0;
       const target = input.left ? 1 : input.right ? -1 : 0;
+      const top = car.def.max * (car.tuned ? 1.15 : 1);
       car.steer += (target - car.steer) * Math.min(1, dt * 8);
       if (fwd) car.speed += car.def.accel * dt;
       if (rev) car.speed -= (car.speed > 0.5 ? 22 : 9) * dt;
       if (!fwd && !rev) car.speed -= Math.sign(car.speed) * 6 * dt;
       if (input.handbrake) car.speed -= Math.sign(car.speed) * 26 * dt;
-      car.speed = Math.max(-car.def.max * 0.35, Math.min(car.def.max, car.speed));
+      car.speed = Math.max(-top * 0.35, Math.min(top, car.speed));
       if (Math.abs(car.speed) < 0.15 && !fwd && !rev) car.speed = 0;
       const turn = car.steer * 1.9 * car.def.grip * dt * Math.min(1, Math.abs(car.speed) / 6) * (car.speed >= 0 ? 1 : -1);
       car.yaw += turn * (input.handbrake ? 1.5 : 1);
@@ -73,12 +86,12 @@ export function createVehicles(scene, world) {
       const nz = car.z + Math.cos(car.yaw) * car.speed * dt;
       const hit = world.collide(nx, nz, 1.4);
       const crashed = Math.abs(hit.x - nx) > 0.001 || Math.abs(hit.z - nz) > 0.001;
-      if (crashed && Math.abs(car.speed) > 6) { if (onCrash) onCrash(Math.abs(car.speed)); car.speed *= -0.25; }
-      else if (crashed) car.speed *= 0.4;
+      if (crashed && Math.abs(car.speed) > 6) { if (onCrash) onCrash(Math.abs(car.speed)); car.speed *= car.plated ? -0.08 : -0.25; }
+      else if (crashed) car.speed *= car.plated ? 0.8 : 0.4;
       car.x = hit.x; car.z = hit.z;
       car.mesh.position.set(car.x, 0, car.z); car.mesh.rotation.y = car.yaw;
       for (const w of car.mesh.userData.wheels) w.rotation.x += car.speed * dt * 2.4;
-      if (audio) audio.startEngine(Math.abs(car.speed) / car.def.max);
+      if (audio) audio.startEngine(Math.abs(car.speed) / top);
       // Wheel spin is visual only; steering angle tilts the front wheels slightly.
       car.mesh.userData.wheels[0].rotation.y = car.steer * 0.3; car.mesh.userData.wheels[1].rotation.y = car.steer * 0.3;
       if (effects && Math.abs(car.speed) > 14 && Math.random() < 0.5) {

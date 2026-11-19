@@ -1,5 +1,6 @@
 // Dario Venn on foot: WASD movement relative to camera yaw, sprint, jump with
 // gravity, third-person camera, simple capsule mesh + aim pose, health.
+// maxHealth rises to 150 when Dario buys the Kevlar vest at Doc's Clinic.
 import * as THREE from 'three';
 export function createPlayer(scene, world) {
   const group = new THREE.Group();
@@ -19,7 +20,7 @@ export function createPlayer(scene, world) {
     health: 100, maxHealth: 100, speed: 0, weapon: 'pistol', ammo: 12, reserve: 48,
     // Walk/run animation phase, driven by speed.
     anim: 0,
-    reset(x, z) { p.pos.set(x, 0, z); p.yaw = Math.PI; p.vy = 0; p.health = 100; p.ammo = 12; p.reserve = 48; },
+    reset(x, z) { p.pos.set(x, 0, z); p.yaw = Math.PI; p.vy = 0; p.health = p.maxHealth; p.ammo = 12; p.reserve = 48; },
     update(dt, input, camYaw) {
       const look = input.consumeLook();
       p.yaw -= look.dx * 0.0028;

@@ -1,10 +1,19 @@
 // Solmara city generation: street grid, sidewalks, procedural buildings with
 // canvas window textures, palm trees, streetlights, beach + marina district,
-// day sky, sun and fog. Also exports collision boxes and road data for AI.
+// neon sunset signs, rain-slick wet roads with puddles, three shop fronts and
+// police roadblock props. Also exports collision boxes and road data for AI.
 import * as THREE from 'three';
 
 export const CITY = { half: 260, block: 44, road: 14 };
 const PALETTE = [0xd8c9a8, 0xc9b8a0, 0xe0d6c0, 0xb8a88e, 0xd0bfa5, 0xc4a882, 0x9fb8c8, 0xe8b48a];
+
+// The three shops Dario can walk into (B to open when close). Positions are
+// fixed so the minimap, the HUD hint and the save file all agree on them.
+export const SHOPS = [
+  { id: 'arms', name: 'Solmara Arms', what: 'Weapons & ammo', x: -58, z: -58, color: 0xff4a6a },
+  { id: 'motors', name: "Rico's Motors", what: 'Cars & tuning', x: 116, z: -58, color: 0x37d8ff },
+  { id: 'clinic', name: "Doc's Clinic", what: 'Health & armor', x: -58, z: 116, color: 0x59e38a },
+];
 
 function mulberry(seed) {
   let a = seed >>> 0;
@@ -40,18 +49,40 @@ function makePalm(rand) {
   nut.position.y = 5.0; g.add(nut);
   return g;
 }
+// A glowing neon sign board: a bright face plus a darker backing plate, so the
+// sign reads as light even under the sunset Lambert lighting.
+function makeNeonSign(text, color, w) {
+  const g = new THREE.Group();
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(w, 2.2, 0.4), new THREE.MeshLambertMaterial({ color: 0x14161c }));
+  g.add(plate);
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.4, 1.7), new THREE.MeshBasicMaterial({ color }));
+  face.position.z = 0.22; g.add(face);
+  // Letters are drawn on a tiny canvas so the sign names the place.
+  const c = document.createElement('canvas'); c.width = 256; c.height = 48;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, 256, 48);
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 26px Arial, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, 128, 26);
+  const tex = new THREE.CanvasTexture(c);
+  const letters = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.6, 1.5), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+  letters.position.z = 0.24; g.add(letters);
+  return g;
+}
 
 export function createWorld(scene, seed) {
   const rand = mulberry(seed || 12345);
   const colliders = []; // {x,z,hx,hz}
   const roads = []; // {x1,z1,x2,z2} axis-aligned road centre lines
   const carSpawns = []; const pedSpawns = [];
+  const puddles = []; // rain-slick reflective patches on the roads
+  const roadblocks = []; // {mesh, x, z, active} police barriers, hidden until 3+ stars
   const { half, block, road } = CITY;
-  // Sky, sun, fog, lights.
-  scene.background = new THREE.Color(0x87bfe8);
-  scene.fog = new THREE.Fog(0x9fc8e8, 180, 520);
-  const sun = new THREE.DirectionalLight(0xfff2d0, 2.4); sun.position.set(120, 180, 60); scene.add(sun);
-  scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x8a7a5a, 1.1));
+  // Neon sunset sky: the storm front turns the whole city orange-pink, and the
+  // hurricane module deepens it toward purple-grey as landfall approaches.
+  scene.background = new THREE.Color(0xff9a5c);
+  scene.fog = new THREE.Fog(0xe88a5c, 170, 520);
+  const sun = new THREE.DirectionalLight(0xffc890, 2.4); sun.position.set(120, 90, 60); scene.add(sun);
+  scene.add(new THREE.HemisphereLight(0xffb38a, 0x5a4a6a, 1.1));
   // Ground: grass base, then sand beach strip on the south edge, sea plane beyond.
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(half * 2 + 400, half * 2 + 400), new THREE.MeshLambertMaterial({ color: 0x7fae62 }));
   ground.rotation.x = -Math.PI / 2; scene.add(ground);
@@ -70,8 +101,10 @@ export function createWorld(scene, seed) {
     mast.position.y = 2.6; boat.add(mast);
     boat.position.set(-140 + i * 16, 0.1, half + 95 + (i % 2) * 14); scene.add(boat);
   }
-  // Roads: grid lines every block+road, plus the beachfront avenue.
-  const roadMat = new THREE.MeshLambertMaterial({ color: 0x3a3f46 });
+  // Roads: grid lines every block+road, plus the beachfront avenue. The road
+  // surface is a glossy Phong material now, so headlights and the neon signs
+  // read as wet reflections once the rain starts.
+  const roadMat = new THREE.MeshPhongMaterial({ color: 0x2e333c, shininess: 90, specular: 0x7a90a8 });
   const lineMat = new THREE.MeshBasicMaterial({ color: 0xe8d44d });
   const roadLines = [];
   for (let k = -4; k <= 4; k++) roadLines.push(k * (block + road));
@@ -88,6 +121,18 @@ export function createWorld(scene, seed) {
       dash2.rotation.x = -Math.PI / 2; dash2.position.set(v, 0.05, d); scene.add(dash2);
     }
   }
+  // Puddles: pale, semi-transparent, very shiny discs scattered on the roads.
+  // They start faint and grow opaque as the storm escalates (setWet).
+  const puddleMat = new THREE.MeshPhongMaterial({ color: 0x9fc8e8, shininess: 140, specular: 0xffffff, transparent: true, opacity: 0.18 });
+  for (let i = 0; i < 26; i++) {
+    const r = 2 + rand() * 3.5;
+    const p = new THREE.Mesh(new THREE.CircleGeometry(r, 14), puddleMat.clone());
+    p.rotation.x = -Math.PI / 2;
+    const onH = rand() < 0.5;
+    p.position.set(onH ? -half + rand() * half * 2 : roadLines[Math.floor(rand() * roadLines.length)] + (rand() - 0.5) * 6,
+      0.06, onH ? roadLines[Math.floor(rand() * roadLines.length)] + (rand() - 0.5) * 6 : -half + rand() * half * 2);
+    scene.add(p); puddles.push(p);
+  }
   // Sidewalks: light strips flanking each road (also the pedestrian walking band).
   const walkMat = new THREE.MeshLambertMaterial({ color: 0xb8b0a0 });
   for (const v of roadLines) {
@@ -103,6 +148,7 @@ export function createWorld(scene, seed) {
   const texCache = [];
   for (let i = 0; i < 6; i++) texCache.push(buildingTexture(rand, '#' + PALETTE[i % PALETTE.length].toString(16).padStart(6, '0')));
   let bi = 0;
+  const neonColors = [0xff4a9a, 0x37d8ff, 0xffe040, 0x59e38a, 0xff7a3c];
   for (let gx = -4; gx < 4; gx++) for (let gz = -4; gz < 4; gz++) {
     const cx = gx * (block + road) + (block + road) / 2;
     const cz = gz * (block + road) + (block + road) / 2;
@@ -118,10 +164,46 @@ export function createWorld(scene, seed) {
       const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.6, 0.5, d + 0.6), new THREE.MeshLambertMaterial({ color: 0x555a60 }));
       roof.position.set(bx, h + 0.25, bz); scene.add(roof);
       colliders.push({ x: bx, z: bz, hx: w / 2 + 0.3, hz: d / 2 + 0.3 });
+      // One building in three gets a neon sign on its street-facing side.
+      if (rand() < 0.33) {
+        const sign = makeNeonSign(['SOLMARA', 'HOTEL', 'BAR', '24H', 'NEON', 'PIER'][Math.floor(rand() * 6)], neonColors[Math.floor(rand() * neonColors.length)], 10 + rand() * 6);
+        sign.position.set(bx, Math.min(h - 2, 9 + rand() * 6), bz + d / 2 + 0.3);
+        scene.add(sign);
+      }
     }
     // Palms + streetlights around the block corners.
     if (rand() < 0.75) { const p = makePalm(rand); p.position.set(cx - block / 2 + 3, 0, cz - block / 2 + 3); scene.add(p); }
     if (rand() < 0.5) { const p = makePalm(rand); p.position.set(cx + block / 2 - 3, 0, cz + block / 2 - 3); scene.add(p); }
+  }
+  // Shop fronts: a low coloured building with a big glowing name sign, placed
+  // on open corners so the player can walk up and press B.
+  for (const s of SHOPS) {
+    const front = new THREE.Mesh(new THREE.BoxGeometry(16, 7, 12), new THREE.MeshLambertMaterial({ color: s.color }));
+    front.position.set(s.x, 3.5, s.z); scene.add(front);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(16.6, 0.5, 12.6), new THREE.MeshLambertMaterial({ color: 0x22262c }));
+    roof.position.set(s.x, 7.25, s.z); scene.add(roof);
+    const sign = makeNeonSign(s.name.toUpperCase(), s.color, 15);
+    sign.position.set(s.x, 8.6, s.z + 6.4); scene.add(sign);
+    colliders.push({ x: s.x, z: s.z, hx: 8.3, hz: 6.3 });
+  }
+  // Police roadblock props: striped barriers, hidden until the police deploy
+  // them at 3+ stars. Four exist; the police module places the active ones.
+  const stripeMat = new THREE.MeshLambertMaterial({ color: 0xff5a2a });
+  const whiteMat = new THREE.MeshLambertMaterial({ color: 0xf0f0f0 });
+  for (let i = 0; i < 4; i++) {
+    const g = new THREE.Group();
+    for (let k = -1; k <= 1; k++) {
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.7, 0.5), k % 2 === 0 ? stripeMat : whiteMat);
+      seg.position.set(k * 2.3, 0.9, 0); g.add(seg);
+    }
+    for (const lx of [-3.4, 3.4]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.9, 0.8), new THREE.MeshLambertMaterial({ color: 0x22262c }));
+      leg.position.set(lx, 0.45, 0); g.add(leg);
+    }
+    const light = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2222 }));
+    light.position.set(0, 1.6, 0); g.add(light);
+    g.visible = false; scene.add(g);
+    roadblocks.push({ mesh: g, x: 0, z: 0, yaw: 0, active: false, hit: false });
   }
   // Streetlights along roads.
   const poleMat = new THREE.MeshLambertMaterial({ color: 0x333a40 });
@@ -137,7 +219,20 @@ export function createWorld(scene, seed) {
   for (let i = 0; i < 26; i++) carSpawns.push({ x: roadLines[i % roadLines.length] + (rand() - 0.5) * 4, z: roadLines[(i * 3) % roadLines.length], yaw: (i % 4) * Math.PI / 2 });
   for (let i = 0; i < 40; i++) pedSpawns.push({ x: roadLines[i % roadLines.length] + 10, z: roadLines[(i * 7) % roadLines.length] + 10 });
   return {
-    colliders, roads, carSpawns, pedSpawns, sun,
+    colliders, roads, carSpawns, pedSpawns, sun, puddles, roadblocks, shops: SHOPS,
+    // Wetness 0..1: puddles grow more visible and the roads get darker/slicker.
+    setWet(level) {
+      const l = Math.max(0, Math.min(1, level));
+      for (const p of puddles) p.material.opacity = 0.12 + l * 0.6;
+      roadMat.color.setHex(l > 0.5 ? 0x232830 : 0x2e333c);
+    },
+    // Sunset-to-storm sky: t 0 = golden sunset, 1 = dark hurricane sky.
+    setSky(t, sunColor) {
+      const sky = new THREE.Color(0xff9a5c).lerp(new THREE.Color(0x3a3348), t);
+      scene.background.copy(sky); scene.fog.color.copy(sky);
+      sun.color.setHex(sunColor || 0xffc890);
+      sun.intensity = 2.4 - t * 1.5;
+    },
     // Circle-vs-box collision: push a point out of every building box it enters.
     collide(x, z, r) {
       let nx = x, nz = z;

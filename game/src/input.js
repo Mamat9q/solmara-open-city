@@ -1,5 +1,5 @@
 // Keyboard + mouse input for Solmara: WASD, sprint, jump, E interact, R reload,
-// F fists/pistol swap, Esc pause, mouse-look deltas and click-to-shoot state.
+// F fists/pistol swap, B shops, Esc pause, mouse-look deltas and click-to-shoot state.
 export function createInput(canvas) {
   const keys = new Set();
   let lookDX = 0, lookDY = 0, mouseDown = false, mouseClicked = false;
@@ -7,8 +7,8 @@ export function createInput(canvas) {
   const onKeyDown = (e) => {
     if (e.code === 'Tab') e.preventDefault();
     keys.add(e.code);
-    // Pulse once per physical press: ignore auto-repeat so E/R/F never double-fire.
-    if (!e.repeat && (e.code === 'KeyE' || e.code === 'KeyR' || e.code === 'KeyF' || e.code === 'KeyM' || e.code === 'KeyT' || e.code === 'KeyG')) keys.add('Pulse:' + e.code);
+    // Pulse once per physical press: ignore auto-repeat so E/R/F/B never double-fire.
+    if (!e.repeat && (e.code === 'KeyE' || e.code === 'KeyR' || e.code === 'KeyF' || e.code === 'KeyM' || e.code === 'KeyT' || e.code === 'KeyG' || e.code === 'KeyB')) keys.add('Pulse:' + e.code);
   };
   const onKeyUp = (e) => keys.delete(e.code);
   const onMouseMove = (e) => {

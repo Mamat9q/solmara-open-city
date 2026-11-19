@@ -1,5 +1,6 @@
 // Weapons + enemies: pistol with raycast-style hit test, fists, reload,
 // muzzle flash, enemy NPCs who shoot back, health packs scattered in the city.
+// A bought Kevlar vest halves the damage enemies deal to Dario.
 import * as THREE from 'three';
 export function createCombat(scene, world) {
   const enemies = [];
@@ -77,6 +78,7 @@ export function createCombat(scene, world) {
     },
     update(dt, state, audio) {
       const pp = state.player.pos;
+      const armored = (state.shopOwned || []).includes('armor');
       for (const e of enemies) {
         if (!e.alive) continue;
         const dx = pp.x - e.x, dz = pp.z - e.z, d = Math.hypot(dx, dz) || 1;
@@ -86,7 +88,7 @@ export function createCombat(scene, world) {
         if (e.shootTimer <= 0 && d < 38) {
           e.shootTimer = 1.4 + Math.random();
           if (Math.random() < 0.55) {
-            state.player.damage(7 + Math.random() * 6);
+            state.player.damage((7 + Math.random() * 6) * (armored ? 0.5 : 1));
             if (audio) audio.enemyShot();
             if (state.effects) state.effects.addShake(0.3);
             state.message(`${e.label} hit you!`);

@@ -1,5 +1,7 @@
 // HUD + minimap for Solmara: health, cash, wanted stars, ammo, speed, clock,
-// objective banner, message feed, dialogue lines, live 2D top-down minimap.
+// hurricane countdown, objective banner, message feed, dialogue lines, live
+// 2D top-down minimap with shops, roadblocks, police and waypoint.
+import { STORY } from './missions.js';
 export function createHud() {
   const $ = (id) => document.getElementById(id);
   const feed = $('feed');
@@ -13,7 +15,7 @@ export function createHud() {
     say(line) { const el = $('dialogue'); if (el) { el.textContent = line; el.style.opacity = 1; clearTimeout(el._t); el._t = setTimeout(() => { el.style.opacity = 0; }, 4200); } },
     update(state) {
       setText('health-value', Math.ceil(state.player.health) + '');
-      const hb = $('health-fill'); if (hb) hb.style.width = Math.max(0, state.player.health) + '%';
+      const hb = $('health-fill'); if (hb) hb.style.width = Math.max(0, state.player.health / state.player.maxHealth * 100) + '%';
       setText('cash-value', '$' + state.cash.toLocaleString('en-US'));
       setText('stars-value', '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted));
       setText('ammo-value', state.player.weapon === 'fists' ? 'FISTS' : `${state.player.ammo} / ${state.player.reserve}`);
@@ -26,14 +28,19 @@ export function createHud() {
       setText('objective-text', state.objective || '');
       const h = Math.floor(state.clock) % 24, m = Math.floor((state.clock % 1) * 60);
       setText('clock-value', `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-      setText('mission-value', state.missionIndex >= 5 ? 'All done' : `Mission ${state.missionIndex + 1}/5`);
+      if (state.hurricane) {
+        setText('storm-value', `DAY ${state.hurricane.day}/7 · LANDFALL IN ${state.hurricane.countdownText()} · ${state.hurricane.weather.toUpperCase()}`);
+      }
+      setText('mission-value', state.missionIndex >= STORY.length ? 'All done' : `Mission ${state.missionIndex + 1}/${STORY.length} — ${state.hurricane ? state.hurricane.chapter : ''}`);
       const vig = $('vignette');
       if (vig) vig.style.opacity = state.player.health < 40 ? String((40 - state.player.health) / 40 * 0.85) : '0';
       const hint = $('hint');
       if (hint) {
-        if (state.nearCar && !state.currentCar) hint.textContent = `Press E to steal the ${state.nearCar.def.name}`;
+        const near = state.shop ? state.shop.nearestShop(state) : null;
+        if (near && !state.currentCar) hint.textContent = `Press B to enter ${near.name} — ${near.what}`;
+        else if (state.nearCar && !state.currentCar) hint.textContent = `Press E to steal the ${state.nearCar.def.name}`;
         else if (state.currentCar) hint.textContent = 'Press E to exit · Space = handbrake';
-        else hint.textContent = 'WASD move · E enter car · M missions · Esc pause';
+        else hint.textContent = 'WASD move · E enter car · M missions · B shops · Esc pause';
       }
       this.drawMinimap(state);
     },
@@ -50,6 +57,12 @@ export function createHud() {
         g.beginPath(); g.moveTo(toX(-280), toY(v)); g.lineTo(toX(280), toY(v)); g.stroke();
         g.beginPath(); g.moveTo(toX(v), toY(-280)); g.lineTo(toX(v), toY(280)); g.stroke();
       }
+      // Shops: green squares.
+      g.fillStyle = '#59e38a';
+      for (const s of state.world.shops || []) { g.fillRect(toX(s.x) - 4, toY(s.z) - 4, 8, 8); }
+      // Roadblocks: orange bars.
+      g.fillStyle = '#ff7a3c';
+      for (const b of state.world.roadblocks || []) if (b.active) { g.fillRect(toX(b.x) - 5, toY(b.z) - 2, 10, 4); }
       // Waypoint.
       const wp = state.missions.waypoint(state);
       if (wp) {
@@ -70,11 +83,12 @@ export function createHud() {
     },
     show(screen) {
       const xh = $('crosshair'); if (xh) xh.style.display = screen === 'playing' ? 'block' : 'none';
-      for (const id of ['start-screen', 'pause-screen', 'busted-screen']) { const el = $(id); if (el) el.style.display = 'none'; }
+      for (const id of ['start-screen', 'pause-screen', 'busted-screen', 'shop-screen']) { const el = $(id); if (el) el.style.display = 'none'; }
       const hudEl = $('hud'); if (hudEl) hudEl.style.display = screen === 'playing' ? 'block' : 'none';
       if (screen === 'start') { const el = $('start-screen'); if (el) el.style.display = 'flex'; }
       if (screen === 'paused') { const el = $('pause-screen'); if (el) el.style.display = 'flex'; }
       if (screen === 'busted') { const el = $('busted-screen'); if (el) el.style.display = 'flex'; }
+      if (screen === 'shop') { const el = $('shop-screen'); if (el) el.style.display = 'flex'; }
     },
   };
 }

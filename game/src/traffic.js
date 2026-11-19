@@ -1,6 +1,7 @@
 // Traffic cars + pedestrians: AI cars follow the road grid, turn at
 // intersections, stop for nothing but walls; pedestrians stroll sidewalks and
-// flee from the player, gunfire or a speeding car.
+// flee from the player, gunfire or a speeding car. In the late storm the
+// pedestrians hurry for cover and the traffic slows on the slick roads.
 import * as THREE from 'three';
 import { buildCarMesh, CAR_DEFS } from './vehicles.js';
 export function createTraffic(scene, world) {
@@ -29,9 +30,12 @@ export function createTraffic(scene, world) {
   }
   return {
     cars, peds,
-    update(dt, playerPos, playerSpeed, gunfireAt) {
+    update(dt, playerPos, playerSpeed, gunfireAt, storm) {
+      const wet = storm || 0;
       for (const c of cars) {
-        c.along += c.speed * c.dir * dt;
+        // Slick roads in the storm: traffic runs slower and a touch wider.
+        const v = c.speed * (1 - wet * 0.25);
+        c.along += v * c.dir * dt;
         if (c.along > 260) { c.along = -260; c.line = lines[Math.floor(Math.random() * lines.length)]; c.horizontal = Math.random() < 0.5; }
         if (c.along < -260) { c.along = 260; c.line = lines[Math.floor(Math.random() * lines.length)]; c.horizontal = Math.random() < 0.5; }
         // Random turn at an intersection: switch axis/line occasionally.
@@ -58,7 +62,9 @@ export function createTraffic(scene, world) {
           p.x += Math.sin(a) * 4.5 * dt; p.z += Math.cos(a) * 4.5 * dt; p.yaw = a;
         } else {
           p.panic = 0; p.yaw += (Math.random() - 0.5) * dt * 1.4;
-          p.x += Math.sin(p.yaw) * p.speed * dt; p.z += Math.cos(p.yaw) * p.speed * dt;
+          // In heavy rain pedestrians hurry along a little faster.
+          const hurry = 1 + wet * 0.8;
+          p.x += Math.sin(p.yaw) * p.speed * hurry * dt; p.z += Math.cos(p.yaw) * p.speed * hurry * dt;
           const h = world.collide(p.x, p.z, 0.4);
           if (h.x !== p.x || h.z !== p.z) { p.x = h.x; p.z = h.z; p.yaw += Math.PI / 2; }
         }

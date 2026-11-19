@@ -1,5 +1,6 @@
 // Synthesized WebAudio sounds only: no audio files, no network. Engine hum,
-// siren, gunshot, pickup chime, UI clicks and a simple synth music loop.
+// siren, gunshot, pickup chime, UI clicks, thunder rolls and a simple synth
+// music loop.
 export function createAudio() {
   let ctx = null, master = null, musicTimer = null, musicOn = false;
   let engineOsc = null, engineGain = null;
@@ -46,6 +47,8 @@ export function createAudio() {
     hurt() { tone(220, 0.18, 'sawtooth', 0.25, 110); },
     busted() { tone(440, 0.3, 'square', 0.2, 330); tone(330, 0.4, 'square', 0.2, 220); },
     missionDone() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.16, 'triangle', 0.22), i * 110)); },
+    // Distant thunder: a long low rumble that swells and fades.
+    thunder() { noise(1.6, 0.35, 220); setTimeout(() => noise(1.2, 0.2, 160), 350); },
     startEngine(speed01) {
       if (!ensure()) return;
       if (!engineOsc) {
