@@ -1,94 +1,117 @@
-// HUD + minimap for Solmara: health, cash, wanted stars, ammo, speed, clock,
-// hurricane countdown, objective banner, message feed, dialogue lines, live
-// 2D top-down minimap with shops, roadblocks, police and waypoint.
-import { STORY } from './missions.js';
-export function createHud() {
-  const $ = (id) => document.getElementById(id);
-  const feed = $('feed');
-  function setText(id, v) { const el = $(id); if (el) el.textContent = v; }
-  return {
-    message(text) {
-      if (!feed) return;
-      const d = document.createElement('div'); d.textContent = text; feed.prepend(d);
-      while (feed.children.length > 5) feed.removeChild(feed.lastChild);
-    },
-    say(line) { const el = $('dialogue'); if (el) { el.textContent = line; el.style.opacity = 1; clearTimeout(el._t); el._t = setTimeout(() => { el.style.opacity = 0; }, 4200); } },
-    update(state) {
-      setText('health-value', Math.ceil(state.player.health) + '');
-      const hb = $('health-fill'); if (hb) hb.style.width = Math.max(0, state.player.health / state.player.maxHealth * 100) + '%';
-      setText('cash-value', '$' + state.cash.toLocaleString('en-US'));
-      setText('stars-value', '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted));
-      setText('ammo-value', state.player.weapon === 'fists' ? 'FISTS' : `${state.player.ammo} / ${state.player.reserve}`);
-      setText('weapon-value', state.player.weapon === 'fists' ? 'Fists' : 'Pistol');
-      const speedEl = $('speed-box');
-      if (speedEl) {
-        if (state.currentCar) { speedEl.style.display = 'block'; setText('speed-value', Math.round(Math.abs(state.currentCar.speed) * 3.6) + ''); }
-        else speedEl.style.display = 'none';
-      }
-      setText('objective-text', state.objective || '');
-      const h = Math.floor(state.clock) % 24, m = Math.floor((state.clock % 1) * 60);
-      setText('clock-value', `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-      if (state.hurricane) {
-        setText('storm-value', `DAY ${state.hurricane.day}/7 · LANDFALL IN ${state.hurricane.countdownText()} · ${state.hurricane.weather.toUpperCase()}`);
-      }
-      setText('mission-value', state.missionIndex >= STORY.length ? 'All done' : `Mission ${state.missionIndex + 1}/${STORY.length} — ${state.hurricane ? state.hurricane.chapter : ''}`);
-      const vig = $('vignette');
-      if (vig) vig.style.opacity = state.player.health < 40 ? String((40 - state.player.health) / 40 * 0.85) : '0';
-      const hint = $('hint');
-      if (hint) {
-        const near = state.shop ? state.shop.nearestShop(state) : null;
-        if (near && !state.currentCar) hint.textContent = `Press B to enter ${near.name} — ${near.what}`;
-        else if (state.nearCar && !state.currentCar) hint.textContent = `Press E to steal the ${state.nearCar.def.name}`;
-        else if (state.currentCar) hint.textContent = 'Press E to exit · Space = handbrake';
-        else hint.textContent = 'WASD move · E enter car · M missions · B shops · Esc pause';
-      }
-      this.drawMinimap(state);
-    },
-    drawMinimap(state) {
-      const c = $('minimap'); if (!c) return;
-      const g = c.getContext('2d'); const W = c.width, H = c.height;
-      const scale = W / 560;
-      const toX = (x) => (x + 280) * scale, toY = (z) => (z + 280) * scale;
-      g.fillStyle = '#0e1a24'; g.fillRect(0, 0, W, H);
-      g.fillStyle = '#2c4a63'; g.fillRect(0, toY(260), W, H - toY(260)); // sea
-      g.fillStyle = '#e8d49a'; g.fillRect(0, toY(250), W, 12); // beach
-      g.strokeStyle = '#5a6a78'; g.lineWidth = 5;
-      for (const v of state.world.roadLines) {
-        g.beginPath(); g.moveTo(toX(-280), toY(v)); g.lineTo(toX(280), toY(v)); g.stroke();
-        g.beginPath(); g.moveTo(toX(v), toY(-280)); g.lineTo(toX(v), toY(280)); g.stroke();
-      }
-      // Shops: green squares.
-      g.fillStyle = '#59e38a';
-      for (const s of state.world.shops || []) { g.fillRect(toX(s.x) - 4, toY(s.z) - 4, 8, 8); }
-      // Roadblocks: orange bars.
-      g.fillStyle = '#ff7a3c';
-      for (const b of state.world.roadblocks || []) if (b.active) { g.fillRect(toX(b.x) - 5, toY(b.z) - 2, 10, 4); }
-      // Waypoint.
-      const wp = state.missions.waypoint(state);
-      if (wp) {
-        g.fillStyle = wp.color; g.beginPath(); g.arc(toX(wp.x), toY(wp.z), 7, 0, Math.PI * 2); g.fill();
-        g.strokeStyle = wp.color; g.beginPath(); g.arc(toX(wp.x), toY(wp.z), 11 + Math.sin(performance.now() / 200) * 2, 0, Math.PI * 2); g.stroke();
-      }
-      // Police dots.
-      g.fillStyle = '#3a8cff';
-      for (const pc of state.police.copCars) if (pc.active) { g.beginPath(); g.arc(toX(pc.x), toY(pc.z), 4, 0, Math.PI * 2); g.fill(); }
-      // Cars.
-      g.fillStyle = '#c8c8c8';
-      for (const car of state.vehicles.cars) { g.fillRect(toX(car.x) - 2, toY(car.z) - 2, 4, 4); }
-      // Player arrow.
-      const px = toX(state.player.pos.x), py = toY(state.player.pos.z);
-      const yaw = state.currentCar ? state.currentCar.yaw : state.player.yaw;
-      g.save(); g.translate(px, py); g.rotate(Math.atan2(Math.sin(yaw), Math.cos(yaw)) + Math.PI);
-      g.fillStyle = '#ffd94d'; g.beginPath(); g.moveTo(0, -8); g.lineTo(5, 6); g.lineTo(-5, 6); g.closePath(); g.fill(); g.restore();
-    },
-    show(screen) {
-      const xh = $('crosshair'); if (xh) xh.style.display = screen === 'playing' ? 'block' : 'none';
-      for (const id of ['start-screen', 'pause-screen', 'busted-screen', 'shop-screen']) { const el = $(id); if (el) el.style.display = 'none'; }
-      const hudEl = $('hud'); if (hudEl) hudEl.style.display = screen === 'playing' ? 'block' : 'none';
-      if (screen === 'start') { const el = $('start-screen'); if (el) el.style.display = 'flex'; }
-      if (screen === 'paused') { const el = $('pause-screen'); if (el) el.style.display = 'flex'; }
-      if (screen === 'busted') { const el = $('busted-screen'); if (el) el.style.display = 'flex'; }
-      if (screen === 'shop') { const el = $('shop-screen'); if (el) el.style.display = 'flex'; }
-    },
-  };
+// SOLMARA HUD: cash, health, wanted stars, ammo, the storm countdown and
+// the mission line, plus a live minimap — shops green, roadblocks orange,
+// the mission target yellow, police flashing blue.
+
+import { CITY, HURRICANE, MISSIONS, SHOPS } from './config.js';
+
+export function drawMinimap(game) {
+  const canvas = document.getElementById('minimap');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const size = canvas.width;
+  const scale = size / (CITY.halfSize * 2 + 20);
+  const toMap = (x, z) => [(x + CITY.halfSize + 10) * scale, (z + CITY.halfSize + 10) * scale];
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = '#101018';
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = '#3d3d4a';
+  ctx.lineWidth = 5;
+  for (const line of CITY.roadLines) {
+    const [x1, y1] = toMap(line, -CITY.halfSize);
+    const [x2, y2] = toMap(line, CITY.halfSize);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    const [hx1, hy1] = toMap(-CITY.halfSize, line);
+    const [hx2, hy2] = toMap(CITY.halfSize, line);
+    ctx.beginPath();
+    ctx.moveTo(hx1, hy1);
+    ctx.lineTo(hx2, hy2);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#2f6fb5';
+  const [, oceanY] = toMap(0, CITY.beachZ + 6);
+  ctx.fillRect(0, oceanY, size, size - oceanY);
+  ctx.fillStyle = '#2ecc71';
+  for (const shop of SHOPS) {
+    const [sx, sy] = toMap(shop.x, shop.z);
+    ctx.fillRect(sx - 3, sy - 3, 6, 6);
+  }
+  ctx.fillStyle = '#ff7a1a';
+  for (const block of game.world.roadblocks) {
+    if (!block.active) continue;
+    const [bx, by] = toMap(block.x, block.z);
+    ctx.fillRect(bx - 3, by - 3, 6, 6);
+  }
+  if (game.missions.active) {
+    const [tx, ty] = toMap(game.missions.active.target.x, game.missions.active.target.z);
+    ctx.fillStyle = '#ffd23a';
+    ctx.beginPath();
+    ctx.moveTo(tx, ty - 6);
+    ctx.lineTo(tx + 5, ty);
+    ctx.lineTo(tx, ty + 6);
+    ctx.lineTo(tx - 5, ty);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.fillStyle = '#e8c93a';
+  for (const car of game.vehicles.cars) {
+    const [cx, cy] = toMap(car.x, car.z);
+    ctx.fillRect(cx - 1.5, cy - 1.5, 3, 3);
+  }
+  const flashing = Math.floor(game.elapsedTime * 4) % 2 === 0;
+  ctx.fillStyle = flashing ? '#3a6cff' : '#ff3a3a';
+  for (const cop of game.police.copCars) {
+    if (!cop.active) continue;
+    const [px, py] = toMap(cop.x, cop.z);
+    ctx.beginPath();
+    ctx.arc(px, py, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const [px, py] = toMap(game.player.pos.x, game.player.pos.z);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(px, py - 6);
+  ctx.lineTo(px + 5, py + 5);
+  ctx.lineTo(px - 5, py + 5);
+  ctx.closePath();
+  ctx.fill();
+}
+
+export function refreshHud(game) {
+  const cash = document.getElementById('hud-cash');
+  if (cash) cash.textContent = `$${game.cash}`;
+  const healthFill = document.getElementById('hud-health-fill');
+  if (healthFill) {
+    healthFill.style.width = `${Math.max(0, (game.player.health / game.player.maxHealth) * 100)}%`;
+  }
+  const healthText = document.getElementById('hud-health-text');
+  if (healthText) healthText.textContent = `${Math.ceil(game.player.health)} / ${game.player.maxHealth}`;
+  const stars = document.getElementById('hud-stars');
+  if (stars) {
+    stars.textContent = '★'.repeat(game.wanted) + '☆'.repeat(4 - game.wanted);
+    stars.classList.toggle('hot', game.wanted > 0);
+  }
+  const ammo = document.getElementById('hud-ammo');
+  if (ammo) ammo.textContent = `${game.player.ammo} / ${game.player.reserve}`;
+  const storm = document.getElementById('hud-storm');
+  if (storm) {
+    const daysLeft = HURRICANE.totalDays - game.hurricane.day + 1;
+    storm.textContent = `HURRICANE LANDFALL IN ${daysLeft} DAY${daysLeft === 1 ? '' : 'S'} — DAY ${game.hurricane.day}/7`;
+  }
+  const missionLine = document.getElementById('hud-mission');
+  if (missionLine) {
+    missionLine.textContent = game.missions.objectiveText(game.missionIndex);
+  }
+  const missionCount = document.getElementById('hud-mission-count');
+  if (missionCount) {
+    missionCount.textContent = `MISSION ${Math.min(game.missionIndex + 1, 7)}/7`;
+  }
+  const carLine = document.getElementById('hud-car');
+  if (carLine) {
+    carLine.textContent = game.currentCar
+      ? `${game.currentCar.def.name} — ${Math.round(Math.abs(game.currentCar.speed) * 3.6)} km/h`
+      : 'On foot — press E near a car to drive';
+  }
 }

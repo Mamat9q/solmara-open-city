@@ -1,43 +1,103 @@
-// Keyboard + mouse input for Solmara: WASD, sprint, jump, E interact, R reload,
-// F fists/pistol swap, B shops, Esc pause, mouse-look deltas and click-to-shoot state.
-export function createInput(canvas) {
-  const keys = new Set();
-  let lookDX = 0, lookDY = 0, mouseDown = false, mouseClicked = false;
-  let locked = false;
-  const onKeyDown = (e) => {
-    if (e.code === 'Tab') e.preventDefault();
-    keys.add(e.code);
-    // Pulse once per physical press: ignore auto-repeat so E/R/F/B never double-fire.
-    if (!e.repeat && (e.code === 'KeyE' || e.code === 'KeyR' || e.code === 'KeyF' || e.code === 'KeyM' || e.code === 'KeyT' || e.code === 'KeyG' || e.code === 'KeyB')) keys.add('Pulse:' + e.code);
-  };
-  const onKeyUp = (e) => keys.delete(e.code);
-  const onMouseMove = (e) => {
-    if (document.pointerLockElement === canvas) { lookDX += e.movementX; lookDY += e.movementY; }
-  };
-  const onMouseDown = (e) => { if (e.button === 0) { mouseDown = true; mouseClicked = true; } };
-  const onMouseUp = (e) => { if (e.button === 0) mouseDown = false; };
-  window.addEventListener('keydown', onKeyDown);
-  window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('mousemove', onMouseMove);
-  window.addEventListener('mousedown', onMouseDown);
-  window.addEventListener('mouseup', onMouseUp);
-  document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === canvas; });
-  return {
-    keys,
-    get down() { return keys.has('KeyW') || keys.has('ArrowUp'); },
-    get back() { return keys.has('KeyS') || keys.has('ArrowDown'); },
-    get left() { return keys.has('KeyA') || keys.has('ArrowLeft'); },
-    get right() { return keys.has('KeyD') || keys.has('ArrowRight'); },
-    get sprint() { return keys.has('ShiftLeft') || keys.has('ShiftRight'); },
-    get jump() { return keys.has('Space'); },
-    get handbrake() { return keys.has('Space'); },
-    get mouseDown() { return mouseDown; },
-    get mouseClicked() { const c = mouseClicked; mouseClicked = false; return c; },
-    get locked() { return locked; },
-    consumeLook() { const d = { dx: lookDX, dy: lookDY }; lookDX = 0; lookDY = 0; return d; },
-    // One-frame pulse: true once per key press, then cleared by the caller loop.
-    pulse(code) { const k = 'Pulse:' + code; if (keys.has(k)) { keys.delete(k); return true; } return false; },
-    lockPointer() { try { canvas.requestPointerLock(); } catch { /* pointer lock unavailable */ } },
-    unlockPointer() { try { if (document.pointerLockElement) document.exitPointerLock(); } catch { /* noop */ } },
-  };
+// SOLMARA input: keyboard state, mouse look deltas and click-to-shoot, with
+// pointer lock requested only from a real click and every promise rejection
+// swallowed, so a headless browser never sees an unhandled rejection.
+
+export class Input {
+  constructor(canvas, onFirstGesture) {
+    this.keys = new Set();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.clicked = false;
+    this.locked = false;
+    this.canvas = canvas;
+    this.onFirstGesture = onFirstGesture;
+    this.handlers = [];
+  }
+
+  attach() {
+    const down = (event) => {
+      if (event.repeat) return;
+      this.keys.add(event.code);
+      if (this.onFirstGesture) this.onFirstGesture();
+    };
+    const up = (event) => {
+      this.keys.delete(event.code);
+    };
+    const move = (event) => {
+      if (!this.locked) return;
+      this.mouseDX += event.movementX || 0;
+      this.mouseDY += event.movementY || 0;
+    };
+    const click = () => {
+      if (this.onFirstGesture) this.onFirstGesture();
+      this.clicked = true;
+      this.requestLock();
+    };
+    const lockChange = () => {
+      this.locked = document.pointerLockElement === this.canvas;
+    };
+    const lockError = (event) => {
+      if (event && event.preventDefault) event.preventDefault();
+      this.locked = false;
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    document.addEventListener('mousemove', move);
+    this.canvas.addEventListener('mousedown', click);
+    document.addEventListener('pointerlockchange', lockChange);
+    document.addEventListener('pointerlockerror', lockError);
+    this.handlers.push(
+      ['keydown', down], ['keyup', up], ['mousemove', move],
+    );
+    this.canvasClick = click;
+    this.lockChange = lockChange;
+    this.lockError = lockError;
+  }
+
+  requestLock() {
+    try {
+      if (document.pointerLockElement === this.canvas) return;
+      const result = this.canvas.requestPointerLock();
+      if (result && typeof result.catch === 'function') {
+        result.catch(() => {
+          this.locked = false;
+        });
+      }
+    } catch {
+      this.locked = false;
+    }
+  }
+
+  releaseLock() {
+    try {
+      if (document.pointerLockElement) document.exitPointerLock();
+    } catch {
+      // Leaving pointer lock must never throw.
+    }
+  }
+
+  isDown(code) {
+    return this.keys.has(code);
+  }
+
+  consumeLook() {
+    const dx = this.mouseDX;
+    const dy = this.mouseDY;
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    return { dx, dy };
+  }
+
+  consumeClick() {
+    const was = this.clicked;
+    this.clicked = false;
+    return was;
+  }
+
+  clear() {
+    this.keys.clear();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.clicked = false;
+  }
 }
