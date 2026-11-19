@@ -1,8 +1,7 @@
-// Deterministic seeded random numbers (mulberry32). Every procedural choice in
-// the city uses one of these so a seed always builds the same streets.
+// Deterministic RNG (mulberry32) so a fixed seed always stages the same city.
 export function mulberry32(seed) {
   let a = seed >>> 0;
-  return function () {
+  return function next() {
     a |= 0;
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
@@ -11,21 +10,31 @@ export function mulberry32(seed) {
   };
 }
 
-export function makeRng(seed) {
-  const next = mulberry32(seed);
-  return {
-    next,
-    range(min, max) {
-      return min + next() * (max - min);
-    },
-    int(min, max) {
-      return Math.floor(min + next() * (max - min + 1));
-    },
-    pick(list) {
-      return list[Math.floor(next() * list.length)];
-    },
-    chance(p) {
-      return next() < p;
-    },
-  };
+export function range(rng, min, max) {
+  return min + rng() * (max - min);
+}
+
+export function pick(rng, list) {
+  return list[Math.floor(rng() * list.length)];
+}
+
+export function clamp(v, min, max) {
+  return v < min ? min : v > max ? max : v;
+}
+
+export function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+export function angleLerp(a, b, t) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
+}
+
+export function dist2(ax, az, bx, bz) {
+  const dx = ax - bx;
+  const dz = az - bz;
+  return dx * dx + dz * dz;
 }

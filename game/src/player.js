@@ -1,90 +1,102 @@
-// The player on foot: a simple walker who can steal any parked car with E.
-import * as THREE from '../vendor/three.module.min.js';
-import { PLAYER, WORLD, CAR } from './config.js';
-
-function makePlayerMesh() {
-  const g = new THREE.Group();
-  const jacket = new THREE.MeshStandardMaterial({ color: 0xd84a2a, roughness: 0.7 });
-  const pants = new THREE.MeshStandardMaterial({ color: 0x1e2430, roughness: 0.8 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0xd9a077, roughness: 0.7 });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 0.95, 10), jacket);
-  body.position.y = 1.05;
-  g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), skin);
-  head.position.y = 1.78;
-  g.add(head);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.12, 12), pants);
-  cap.position.y = 1.98;
-  g.add(cap);
-  for (const x of [-0.16, 0.16]) {
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.62, 8), pants);
-    leg.position.set(x, 0.31, 0);
-    g.add(leg);
-  }
-  return g;
-}
+// The player on foot: a simple capsule figure, WASD walking with a run key,
+// and getting in and out of the nearest car with E.
+import * as THREE from 'three';
+import { PLAYER } from './config.js';
+import { clamp } from './random.js';
 
 export class Player {
   constructor(scene) {
-    this.group = makePlayerMesh();
+    this.scene = scene;
+    this.group = new THREE.Group();
+    const jacket = new THREE.MeshStandardMaterial({ color: 0xc22a3a, roughness: 0.7 });
+    const jeans = new THREE.MeshStandardMaterial({ color: 0x1c2733, roughness: 0.85 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xd8a077, roughness: 0.8 });
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.42, 0.85, 6, 10), jacket);
+    body.position.y = 1.15;
+    this.group.add(body);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), skin);
+    head.position.y = 2.05;
+    this.group.add(head);
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.7, 0.4), jeans);
+    legs.position.y = 0.38;
+    this.group.add(legs);
     scene.add(this.group);
-    this.pos = new THREE.Vector3(2, 0, 6);
-    this.group.position.copy(this.pos);
+    this.x = 0;
+    this.z = 0;
     this.heading = 0;
-    this.reserve = 24; // spare rounds
-    this.ammo = 12; // rounds in the magazine
-    this.health = 100;
-    this.walkBob = 0;
+    this.health = PLAYER.health;
+    this.armor = 0;
+    this.ammo = PLAYER.startAmmo;
+    this.inCar = false;
+    this.car = null;
   }
 
-  update(dt, input, state) {
-    if (state.currentCar) return; // driving is the car's job
-    const fwd = (input.isDown('KeyW') ? 1 : 0) - (input.isDown('KeyS') ? 1 : 0);
-    const strafe = (input.isDown('KeyD') ? 1 : 0) - (input.isDown('KeyA') ? 1 : 0);
-    if (fwd === 0 && strafe === 0) return;
-    const run = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
-    const speed = run ? PLAYER.runSpeed : PLAYER.walkSpeed;
-    const yaw = state.cameraYaw;
-    const sin = Math.sin(yaw);
-    const cos = Math.cos(yaw);
-    let dx = (sin * fwd + cos * strafe) * speed * dt;
-    let dz = (cos * fwd - sin * strafe) * speed * dt;
-    const len = Math.hypot(dx, dz);
-    if (len > speed * dt) {
-      dx = (dx / len) * speed * dt;
-      dz = (dz / len) * speed * dt;
-    }
-    this.pos.x += dx;
-    this.pos.z += dz;
-    const b = WORLD.size / 2 - 4;
-    this.pos.x = Math.max(-b, Math.min(b, this.pos.x));
-    this.pos.z = Math.max(-b, Math.min(b, this.pos.z));
-    this.heading = Math.atan2(dx, dz);
-    this.group.position.copy(this.pos);
+  place(x, z, heading) {
+    this.x = x;
+    this.z = z;
+    this.heading = heading;
+    this.sync();
+  }
+
+  sync() {
+    this.group.position.set(this.x, 0, this.z);
     this.group.rotation.y = this.heading;
-    this.walkBob += dt * 9;
-    this.group.position.y = Math.abs(Math.sin(this.walkBob)) * 0.06;
+    this.group.visible = !this.inCar;
   }
 
-  // E near a parked car: steal it. Returns the car or null.
-  tryEnterCar(state) {
-    const car = state.vehicles.nearestCar(this.pos.x, this.pos.z, CAR.enterRadius);
-    if (!car) return null;
-    if (!car.stolen) {
-      car.stolen = true;
-      if (state.wanted < 1) state.wanted = 1; // grand theft auto
-      state.toast(`Stole a ${car.def.name} — the law noticed`);
+  step(input, dt, world) {
+    if (this.inCar) return;
+    const run = input.down('ShiftLeft', 'ShiftRight') ? PLAYER.runSpeed : PLAYER.walkSpeed;
+    const fx = input.walkX;
+    const fz = input.walkZ;
+    if (fx === 0 && fz === 0) {
+      this.sync();
+      return;
     }
-    state.currentCar = car;
-    car.heading = this.heading;
-    return car;
+    const len = Math.hypot(fx, fz) || 1;
+    const mx = (fx / len) * run * dt;
+    const mz = (fz / len) * run * dt;
+    // Camera-relative movement: forward is -Z on screen, heading follows motion.
+    const nx = this.x + mx;
+    const nz = this.z + mz;
+    if (world && !world.hitsBuilding(nx, nz, 0.7)) {
+      this.x = nx;
+      this.z = nz;
+    }
+    const clamped = world ? world.clampToCity(this.x, this.z) : [this.x, this.z];
+    this.x = clamped[0];
+    this.z = clamped[1];
+    this.heading = Math.atan2(mx, mz) + Math.PI;
+    this.sync();
   }
 
-  exitCar(state) {
-    const car = state.currentCar;
-    if (!car) return;
-    state.currentCar = null;
-    this.pos.set(car.x + 2.5, 0, car.z + 1.5);
-    this.group.position.copy(this.pos);
+  damage(amount) {
+    let left = amount;
+    if (this.armor > 0) {
+      const absorbed = Math.min(this.armor, left);
+      this.armor -= absorbed;
+      left -= absorbed;
+    }
+    this.health = clamp(this.health - left, 0, PLAYER.health);
+    return this.health <= 0;
+  }
+
+  enterCar(car) {
+    this.inCar = true;
+    this.car = car;
+    this.sync();
+  }
+
+  exitCar() {
+    if (!this.car) return;
+    const car = this.car;
+    // Step out to the driver's side.
+    const side = 2.6;
+    this.x = car.x + Math.cos(car.heading) * side;
+    this.z = car.z - Math.sin(car.heading) * side;
+    this.heading = car.heading;
+    this.inCar = false;
+    this.car = null;
+    this.sync();
   }
 }
