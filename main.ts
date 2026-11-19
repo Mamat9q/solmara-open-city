@@ -1,8 +1,12 @@
-// SOLMARA entry point (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files a desktop browser loads offline, and the program
-// hands it in. It copies game/ and screenshots/ from beside this file to /output and
-// writes /output/dossier.json, the summary the judge reads, with the vendored make.fun
-// library. Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
+// SOLMARA's hand-in program (Node 22, standard library only): the game is this
+// directory's game/ folder, plain static files a desktop browser loads offline
+// (game/index.html and its ES modules, three.js vendored under game/vendor/), and
+// this program hands it in. It copies game/ and screenshots/ from beside this file
+// to /output and writes /output/dossier.json, the summary the judge reads, with the
+// vendored make.fun library.
+//
+// Serve it locally with `node serve.ts`, then open http://localhost:8080.
+// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';

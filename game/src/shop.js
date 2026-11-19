@@ -1,63 +1,58 @@
-// Shops: walk up to a storefront, press B, buy with cash. The first item in
-// every shop is the ammo box ($150, +48 reserve) — the playtest buys it.
+// Solmara Arms: the shop near (-58, -46). The ammo box is first and cheapest
+// to buy, so the first enabled button is always the ammo box.
+export const SHOP_ITEMS = [
+  { id: 'ammo', name: 'Ammo Box', price: 150, desc: '+48 reserve rounds', apply: (s) => { s.player.reserve += 48; } },
+  { id: 'armor', name: 'Kevlar Vest', price: 200, desc: '+50 health, stops one bust', apply: (s) => { s.player.health = Math.min(100, s.player.health + 50); } },
+  { id: 'repair', name: 'Repair Kit', price: 100, desc: 'Fixes your ride, -1 wanted star', apply: (s) => { s.wanted = Math.max(0, s.wanted - 1); } },
+  { id: 'snack', name: 'Street Tacos', price: 25, desc: '+10 health, tastes like victory', apply: (s) => { s.player.health = Math.min(100, s.player.health + 10); } },
+];
 
-import { SHOPS } from './config.js';
+export class Shop {
+  constructor(state) {
+    this.state = state;
+  }
 
-export function nearestShop(state) {
-  let best = null;
-  let bestD = 8;
-  for (const shop of SHOPS) {
-    const d = Math.hypot(state.player.pos.x - shop.x, state.player.pos.z - shop.z);
-    if (d < bestD) {
-      bestD = d;
-      best = shop;
+  open() {
+    const s = this.state;
+    s.screen = 'shop';
+    document.getElementById('screen-shop').classList.add('show');
+    this.render();
+  }
+
+  close() {
+    const s = this.state;
+    s.screen = 'playing';
+    document.getElementById('screen-shop').classList.remove('show');
+  }
+
+  render() {
+    const s = this.state;
+    const list = document.getElementById('shop-items');
+    list.innerHTML = '';
+    document.getElementById('shop-title').textContent = 'Solmara Arms — open all night';
+    for (const item of SHOP_ITEMS) {
+      const owned = s.shopOwned.includes(item.id);
+      const row = document.createElement('div');
+      row.className = 'shop-item';
+      const afford = s.cash >= item.price;
+      row.innerHTML = `<b>${item.name}</b><span>${item.desc}</span><span class="price">$${item.price}</span>`;
+      const btn = document.createElement('button');
+      btn.textContent = owned ? 'Owned' : 'Buy';
+      btn.disabled = owned || !afford;
+      btn.addEventListener('click', () => this.buy(item));
+      row.appendChild(btn);
+      list.appendChild(row);
     }
   }
-  return best;
-}
 
-export function renderShopItems(state, shop) {
-  const list = document.getElementById('shop-items');
-  const title = document.getElementById('shop-title');
-  if (!list || !title) return;
-  title.textContent = shop.name;
-  list.innerHTML = '';
-  for (const item of shop.items) {
-    const row = document.createElement('div');
-    row.className = 'shop-item';
-    const name = document.createElement('span');
-    name.className = 'shop-item-name';
-    name.textContent = item.name;
-    const desc = document.createElement('span');
-    desc.className = 'shop-item-desc';
-    desc.textContent = item.desc;
-    const price = document.createElement('span');
-    price.className = 'shop-item-price';
-    price.textContent = `$${item.price}`;
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = 'Buy';
-    btn.disabled = state.cash < item.price;
-    btn.addEventListener('click', () => {
-      if (buyItem(state, item)) {
-        if (state.audio) state.audio.cash();
-        renderShopItems(state, shop);
-        if (state.onHud) state.onHud();
-      }
-    });
-    row.append(name, desc, price, btn);
-    list.appendChild(row);
+  buy(item) {
+    const s = this.state;
+    if (s.cash < item.price || s.shopOwned.includes(item.id)) return;
+    s.cash -= item.price;
+    item.apply(s);
+    s.shopOwned.push(item.id);
+    s.audio.cash();
+    s.toast(`Bought ${item.name} for $${item.price}`);
+    this.render();
   }
-}
-
-export function buyItem(state, item) {
-  if (state.cash < item.price) return false;
-  state.cash -= item.price;
-  try {
-    item.apply(state);
-  } catch {
-    return false;
-  }
-  if (!state.shopOwned.includes(item.id)) state.shopOwned.push(item.id);
-  return true;
 }

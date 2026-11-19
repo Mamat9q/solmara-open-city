@@ -1,78 +1,113 @@
-// Screenshot staging: ?shot=start|drive|chase|mission&seed=1 puts the game in a
-// photogenic state and raises window.__shotReady once a few frames have
-// rendered. The mission shot is staged on an open road with the beacon in view.
+// Screenshot scenes behind ?shot=start|drive|chase|mission. Each one stages a
+// real game state (never a mock render) and lets the main loop draw it; the main
+// loop sets window.__shotReady once a few frames have rendered.
+import { DT_MAX } from './config.js';
 
-export function stageShot(state, shot) {
-  const s = state;
-  if (shot === 'start') {
-    s.setScreen('start');
-    s.camera.position.set(70, 42, 110);
-    s.camera.lookAt(0, 12, 0);
-    s.shotCamera = { x: 70, y: 42, z: 110 };
-    return true;
+const fakeDriveInput = {
+  isDown: (code) => code === 'KeyW',
+};
+
+function resetForShot(state) {
+  state.cash = 500;
+  state.wanted = 0;
+  state.missionIndex = 0;
+  state.hurricane.day = 1;
+  state.shopOwned = [];
+  state.currentCar = null;
+  state.missions.active = null;
+  state.player.pos.set(2, 0, 6);
+  state.player.group.position.copy(state.player.pos);
+  state.player.group.visible = true;
+  for (const car of state.vehicles.cars) {
+    car.stolen = false;
+    car.speed = 0;
   }
-  if (shot === 'drive' || shot === 'chase' || shot === 'mission') {
-    s.newGame();
-    // Put the player in the first parked car, on the long north avenue.
-    const car = s.vehicles.cars[0];
-    s.player.pos.set(car.x + 2, 0, car.z);
-    s.player.group.position.copy(s.player.pos);
-    s.enterCar();
-    if (shot === 'drive') {
-      car.heading = 0;
-      car.x = 0;
-      car.z = -100;
-      car.speed = 24;
-      car.mesh.position.set(car.x, 0, car.z);
-      car.mesh.rotation.y = car.heading;
-      s.player.pos.set(car.x, 0, car.z);
-      s.player.group.position.copy(s.player.pos);
-    } else if (shot === 'chase') {
-      car.heading = 0;
-      car.x = 0;
-      car.z = -60;
-      car.speed = 22;
-      car.mesh.position.set(car.x, 0, car.z);
-      car.mesh.rotation.y = car.heading;
-      s.player.pos.set(car.x, 0, car.z);
-      s.player.group.position.copy(s.player.pos);
-      s.wanted = 4;
-      for (let i = 0; i < 4; i++) s.police.update(0.5, s, s.audio);
-    } else if (shot === 'mission') {
-      const m = s.missions.start(s);
-      if (m) {
-        // Stage on the open road west of the target, looking at the beacon.
-        car.heading = Math.PI / 2;
-        car.x = m.target.x - 26;
-        car.z = m.target.z;
-        car.speed = 0;
-        car.mesh.position.set(car.x, 0, car.z);
-        car.mesh.rotation.y = car.heading;
-        s.player.pos.set(car.x, 0, car.z);
-        s.player.group.position.copy(s.player.pos);
-      }
-    }
-    return true;
+  for (const cop of state.police.copCars) {
+    cop.active = false;
+    cop.speed = 0;
+    cop.group.visible = false;
   }
-  return false;
+  for (const rb of state.world.roadblocks) {
+    rb.active = false;
+    rb.group.visible = false;
+  }
 }
 
-export function createShotWatcher() {
-  let stagedAt = 0;
-  let frames = 0;
-  return {
-    markStaged() {
-      stagedAt = performance.now();
-      frames = 0;
-    },
-    tick() {
-      frames++;
-      if (stagedAt > 0 && frames >= 3 && performance.now() - stagedAt > 1200) {
-        window.__shotReady = true;
-        stagedAt = 0;
-        return true;
-      }
-      return window.__shotReady === true;
-    },
-  };
+function putPlayerInCar(state, index) {
+  const car = state.vehicles.cars[index];
+  state.currentCar = car;
+  car.stolen = true;
+  state.player.group.visible = false;
+  return car;
+}
+
+function simulateDrive(state, car, seconds) {
+  const steps = Math.round(seconds / DT_MAX);
+  for (let i = 0; i < steps; i++) {
+    state.vehicles.drive(car, fakeDriveInput, DT_MAX);
+  }
+}
+
+export function stageShot(name, state) {
+  resetForShot(state);
+  state.cameraYaw = Math.PI;
+  if (name === 'drive') {
+    state.screen = 'playing';
+    const car = putPlayerInCar(state, 0);
+    car.heading = Math.PI / 2;
+    car.x = -40;
+    car.z = 0;
+    simulateDrive(state, car, 3);
+    state.cameraYaw = car.heading + Math.PI;
+    state.toast('');
+  } else if (name === 'chase') {
+    state.screen = 'playing';
+    const car = putPlayerInCar(state, 0);
+    car.heading = Math.PI / 2;
+    car.x = -20;
+    car.z = 42;
+    simulateDrive(state, car, 2);
+    state.wanted = 4;
+    for (let i = 0; i < 4; i++) state.police.update(0.5, state, state.audio);
+    // Stage two cruisers where the chase camera can see them: ahead of the
+    // player's car, one each side, light bars flashing.
+    const fx = Math.sin(car.heading);
+    const fz = Math.cos(car.heading);
+    const rx = Math.cos(car.heading);
+    const rz = -Math.sin(car.heading);
+    const spots = [
+      [car.x + fx * 24 + rx * -8, car.z + fz * 24 + rz * -8],
+      [car.x + fx * 28 + rx * 8, car.z + fz * 28 + rz * 8],
+    ];
+    spots.forEach(([x, z], i) => {
+      const cop = state.police.copCars[i];
+      cop.x = x;
+      cop.z = z;
+      cop.heading = car.heading;
+      cop.speed = 30;
+      cop.active = true;
+      cop.group.visible = true;
+      cop.group.position.set(x, 0, z);
+      cop.group.rotation.y = car.heading;
+    });
+    state.cameraYaw = car.heading + Math.PI;
+    state.toast('');
+  } else if (name === 'mission') {
+    state.screen = 'playing';
+    state.missions.start(state);
+    const car = putPlayerInCar(state, 0);
+    const t = state.missions.active.target;
+    car.x = t.x;
+    car.z = t.z - 46;
+    car.heading = 0;
+    car.group.position.set(car.x, 0, car.z);
+    car.group.rotation.y = car.heading;
+    state.cameraYaw = Math.PI;
+    state.toast('');
+  } else {
+    // start: the title screen over the city at sunset.
+    state.screen = 'start';
+    state.cameraYaw = Math.PI * 0.78;
+  }
+  return name;
 }

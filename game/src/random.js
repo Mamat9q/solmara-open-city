@@ -1,9 +1,8 @@
-// Seeded RNG (mulberry32) so a ?seed= value builds the same city every time.
-// Screenshots pass seed=1; the game defaults to seed 1 as well.
-
+// Deterministic seeded random numbers (mulberry32). Every procedural choice in
+// the city uses one of these so a seed always builds the same streets.
 export function mulberry32(seed) {
   let a = seed >>> 0;
-  return function next() {
+  return function () {
     a |= 0;
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
@@ -24,6 +23,9 @@ export function makeRng(seed) {
     },
     pick(list) {
       return list[Math.floor(next() * list.length)];
+    },
+    chance(p) {
+      return next() < p;
     },
   };
 }

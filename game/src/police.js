@@ -1,136 +1,136 @@
-// The law: cruisers that chase the player, escalating with the wanted level.
-// Cop top speed is 36 + 3.2 * wanted (48.8 u/s at 4 stars) — faster than any
-// street car, so a 4-star chase is a real chase. update(dt, state, audio) is
-// called by the game loop and is also callable directly (the playtest does).
+// The Solmara PD: cruisers that wake up with the wanted level, chase the
+// player, and deploy roadblocks. A cop never stops on contact: it matches speed,
+// so update() is safe to call directly with big dt in a deterministic check.
+import * as THREE from '../vendor/three.module.min.js';
+import { POLICE, WORLD } from './config.js';
+import { makeRng } from './random.js';
 
-import * as THREE from 'three';
-import { POLICE } from './config.js';
-
-function buildCopMesh() {
+function makeCopMesh() {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x11131a, roughness: 0.35, metalness: 0.4 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.75, 4.4), bodyMat);
-  body.position.y = 0.65;
-  g.add(body);
-  const cabin = new THREE.Mesh(
-    new THREE.BoxGeometry(1.7, 0.65, 2.2),
-    new THREE.MeshStandardMaterial({ color: 0x1a2438, roughness: 0.25, metalness: 0.35 }),
-  );
-  cabin.position.set(0, 1.3, -0.2);
+  const body = new THREE.MeshStandardMaterial({ color: 0x101216, roughness: 0.3, metalness: 0.7 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.4, metalness: 0.5 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x0e1420, roughness: 0.1, metalness: 0.9 });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(2, 0.62, 4.4), body);
+  base.position.y = 0.55;
+  g.add(base);
+  const doors = new THREE.Mesh(new THREE.BoxGeometry(2.02, 0.34, 2.4), white);
+  doors.position.set(0, 0.62, 0.2);
+  g.add(doors);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.55, 2.0), glass);
+  cabin.position.set(0, 1.05, -0.2);
   g.add(cabin);
-  const barMat = new THREE.MeshBasicMaterial({ color: 0xff2d55 });
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.18, 0.5), barMat);
-  bar.position.set(0, 1.72, -0.2);
+  const bar = new THREE.Group();
+  const red = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.3), new THREE.MeshBasicMaterial({ color: 0xff2222 }));
+  red.position.x = -0.35;
+  const blue = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.3), new THREE.MeshBasicMaterial({ color: 0x2244ff }));
+  blue.position.x = 0.35;
+  bar.add(red);
+  bar.add(blue);
+  bar.position.y = 1.42;
   g.add(bar);
-  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 0.9 });
-  const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.3, 10);
-  for (const [x, z] of [[-0.95, 1.45], [0.95, 1.45], [-0.95, -1.45], [0.95, -1.45]]) {
-    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
-    wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(x, 0.42, z);
-    g.add(wheel);
+  g.userData.bar = bar;
+  const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 12);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const dark = new THREE.MeshStandardMaterial({ color: 0x14141a, roughness: 0.8 });
+  for (const [x, z] of [[-0.95, 1.4], [0.95, 1.4], [-0.95, -1.4], [0.95, -1.4]]) {
+    const w = new THREE.Mesh(wheelGeo, dark);
+    w.position.set(x, 0.38, z);
+    g.add(w);
   }
   return g;
 }
 
-export function createPolice(scene) {
-  const group = new THREE.Group();
-  scene.add(group);
-  const copCars = [];
-  for (let i = 0; i < POLICE.maxCops; i++) {
-    const mesh = buildCopMesh();
-    mesh.visible = false;
-    group.add(mesh);
-    copCars.push({
-      x: 0,
-      z: 0,
-      heading: 0,
-      speed: 0,
-      active: false,
-      health: 100,
-      mesh,
-      bar: mesh.children[2],
-    });
+export class Police {
+  constructor(scene, seed = 99) {
+    this.rng = makeRng(seed);
+    this.copCars = [];
+    for (let i = 0; i < 6; i++) {
+      const group = makeCopMesh();
+      group.visible = false;
+      scene.add(group);
+      this.copCars.push({
+        group,
+        x: 0,
+        z: 0,
+        heading: 0,
+        speed: 0,
+        active: false,
+      });
+    }
+    this.decayTimer = 0;
   }
 
-  let sirenOn = false;
-  let respawnTimer = 0;
-
-  function wantedTopSpeed(wanted) {
-    return POLICE.baseTopSpeed + POLICE.topSpeedPerStar * Math.min(4, Math.max(0, wanted));
+  capFor(wanted) {
+    return POLICE.baseCap + wanted * POLICE.perStar;
   }
 
-  function spawnCop(cop, state) {
-    // Spawn ahead of the player on the nearest street, at a distance.
-    const px = state.player.pos.x;
-    const pz = state.player.pos.z;
-    const angle = Math.random() * Math.PI * 2;
-    const d = 55 + Math.random() * 25;
-    cop.x = Math.max(-155, Math.min(155, px + Math.cos(angle) * d));
-    cop.z = Math.max(-155, Math.min(155, pz + Math.sin(angle) * d));
-    cop.speed = 12;
-    cop.mesh.position.set(cop.x, 0, cop.z);
-    cop.mesh.visible = true;
-  }
-
-  function update(dt, state, audio) {
-    const wanted = state.wanted ?? 0;
-    const wantActive = wanted === 0 ? 0 : Math.min(POLICE.maxCops, wanted + 1);
-    let activeCount = 0;
-    for (const cop of copCars) {
-      if (activeCount >= wantActive) {
+  update(dt, state, audio) {
+    const wanted = state.wanted | 0;
+    const want = POLICE.countByWanted[Math.min(wanted, 4)] ?? 0;
+    const px = state.currentCar ? state.currentCar.x : state.player.pos.x;
+    const pz = state.currentCar ? state.currentCar.z : state.player.pos.z;
+    let active = 0;
+    for (const cop of this.copCars) {
+      if (active >= want) {
         if (cop.active) {
           cop.active = false;
+          cop.group.visible = false;
           cop.speed = 0;
-          cop.mesh.visible = false;
         }
         continue;
       }
-      activeCount++;
       if (!cop.active) {
         cop.active = true;
-        spawnCop(cop, state);
+        cop.group.visible = true;
+        const a = this.rng.range(0, Math.PI * 2);
+        cop.x = px + Math.cos(a) * this.rng.range(28, 45);
+        cop.z = pz + Math.sin(a) * this.rng.range(28, 45);
+        cop.speed = 12;
       }
-      const cap = wantedTopSpeed(wanted);
-      cop.speed = Math.min(cap, cop.speed + POLICE.accel * dt);
-      // Steer toward the player.
-      const dx = state.player.pos.x - cop.x;
-      const dz = state.player.pos.z - cop.z;
+      active++;
+      // Steer toward the player and accelerate to the wanted cap.
+      const dx = px - cop.x;
+      const dz = pz - cop.z;
       const dist = Math.hypot(dx, dz) || 1;
-      const targetHeading = Math.atan2(dx, dz);
-      let dh = targetHeading - cop.heading;
+      const wantHeading = Math.atan2(dx, dz);
+      let dh = wantHeading - cop.heading;
       while (dh > Math.PI) dh -= Math.PI * 2;
       while (dh < -Math.PI) dh += Math.PI * 2;
       cop.heading += Math.max(-2.4 * dt, Math.min(2.4 * dt, dh));
+      const cap = this.capFor(wanted);
+      cop.speed += POLICE.accel * dt;
+      if (cop.speed > cap) cop.speed = cap;
+      // Close in but never stop: match the target's speed at contact range.
+      if (dist < 5) {
+        const targetSpeed = state.currentCar ? Math.max(6, state.currentCar.speed * 0.9) : 6;
+        cop.speed = Math.max(cop.speed, targetSpeed);
+      }
       cop.x += Math.sin(cop.heading) * cop.speed * dt;
       cop.z += Math.cos(cop.heading) * cop.speed * dt;
-      cop.x = Math.max(-158, Math.min(158, cop.x));
-      cop.z = Math.max(-158, Math.min(158, cop.z));
-      cop.mesh.position.set(cop.x, 0, cop.z);
-      cop.mesh.rotation.y = cop.heading;
-      // Light bar flashes.
-      if (cop.bar) cop.bar.material.color.setHex(Math.floor(performance.now() / 300) % 2 ? 0xff2d55 : 0x2d7dff);
-      // Ram the player's car: slow it, raise the heat.
-      if (state.currentCar && dist < 3.5) {
-        state.currentCar.speed *= 0.985;
+      const b = WORLD.size / 2 - 4;
+      cop.x = Math.max(-b, Math.min(b, cop.x));
+      cop.z = Math.max(-b, Math.min(b, cop.z));
+      cop.group.position.set(cop.x, 0, cop.z);
+      cop.group.rotation.y = cop.heading;
+      const bar = cop.group.userData.bar;
+      if (bar) bar.visible = Math.floor(performance.now() / 280) % 2 === 0;
+    }
+    // Roadblocks deploy at wanted 3 and up.
+    const blocksOn = wanted >= POLICE.roadblockAt;
+    for (const rb of state.world.roadblocks) {
+      rb.active = blocksOn;
+      rb.group.visible = blocksOn;
+    }
+    if (audio) audio.setSiren(active > 0, performance.now() / 1000);
+    // Wanted decays when the player stays clean.
+    if (wanted > 0) {
+      this.decayTimer += dt;
+      if (this.decayTimer > 25) {
+        this.decayTimer = 0;
+        state.wanted = Math.max(0, wanted - 1);
       }
-    }
-    // Roadblocks deploy at 2+ stars.
-    if (state.world) state.world.setRoadblocks(wanted >= POLICE.roadblockStars ? 2 : 0);
-    // Siren follows the chase.
-    const shouldSiren = wantActive > 0;
-    if (shouldSiren !== sirenOn) {
-      sirenOn = shouldSiren;
-      if (audio) audio.setSiren(sirenOn);
-    }
-    // If the player outruns every cop for a while, the heat cools by one star.
-    respawnTimer += dt;
-    if (respawnTimer > 25 && wanted > 0) {
-      respawnTimer = 0;
-      const nearest = Math.min(...copCars.filter((c) => c.active).map((c) => Math.hypot(c.x - state.player.pos.x, c.z - state.player.pos.z)), 999);
-      if (nearest > 120) state.wanted = Math.max(0, wanted - 1);
+    } else {
+      this.decayTimer = 0;
     }
   }
-
-  return { group, copCars, update, wantedTopSpeed };
 }

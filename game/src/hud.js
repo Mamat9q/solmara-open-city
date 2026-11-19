@@ -1,125 +1,105 @@
-// HUD: cash, hurricane day, wanted stars, speed, mission line, ammo, health,
-// toasts, and a 2D minimap of the city.
+// HUD: cash, day, wanted stars, speed, mission line, toast messages and a
+// live top-down minimap drawn on a 2D canvas.
+import { WORLD } from './config.js';
 
-import { CITY } from './config.js';
-
-export function createHud(state) {
-  const el = (id) => document.getElementById(id);
-  const canvas = el('minimap');
-  const mctx = canvas ? canvas.getContext('2d') : null;
-
-  function fmtCash(n) {
-    return `$${Math.floor(n).toLocaleString('en-US')}`;
+export class HUD {
+  constructor() {
+    this.cash = document.getElementById('hud-cash');
+    this.day = document.getElementById('hud-day');
+    this.stars = document.getElementById('hud-stars');
+    this.speed = document.getElementById('hud-speed');
+    this.mission = document.getElementById('hud-mission');
+    this.toast = document.getElementById('toast');
+    this.map = document.getElementById('minimap');
+    this.mapCtx = this.map ? this.map.getContext('2d') : null;
+    this._toastTimer = null;
   }
 
-  function update() {
-    const cashEl = el('hud-cash');
-    if (cashEl) cashEl.textContent = fmtCash(state.cash);
-    const dayEl = el('hud-day');
-    if (dayEl) dayEl.textContent = `Day ${state.hurricane.day} / 7 — Hurricane in ${7 - state.hurricane.day + 1} day${7 - state.hurricane.day + 1 === 1 ? '' : 's'}`;
-    const wantedEl = el('hud-wanted');
-    if (wantedEl) {
-      wantedEl.textContent = '★'.repeat(state.wanted) + '☆'.repeat(Math.max(0, 4 - state.wanted));
-      wantedEl.classList.toggle('hot', state.wanted > 0);
+  showToast(text) {
+    if (!this.toast) return;
+    this.toast.textContent = text;
+    this.toast.classList.add('show');
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => this.toast.classList.remove('show'), 3600);
+  }
+
+  update(state) {
+    if (this.cash) this.cash.textContent = `$${state.cash}`;
+    if (this.day) this.day.textContent = `Day ${state.hurricane.day} / 7`;
+    if (this.stars) {
+      this.stars.textContent = '★'.repeat(state.wanted) + '☆'.repeat(Math.max(0, 5 - state.wanted));
+      this.stars.classList.toggle('hot', state.wanted > 0);
     }
-    const speedEl = el('hud-speed');
-    if (speedEl) {
-      const s = state.currentCar ? Math.abs(state.currentCar.speed) : 0;
-      speedEl.textContent = `${Math.round(s * 3.6)} km/h`;
+    if (this.speed) {
+      const s = state.currentCar ? Math.abs(state.currentCar.speed) * 3.6 : 0;
+      this.speed.textContent = state.currentCar ? `${Math.round(s)} km/h` : 'on foot';
     }
-    const ammoEl = el('hud-ammo');
-    if (ammoEl) ammoEl.textContent = `Ammo ${state.player.reserve}`;
-    const healthEl = el('hud-health');
-    if (healthEl) healthEl.textContent = `HP ${Math.round(state.player.health ?? 100)}`;
-    const missionEl = el('hud-mission');
-    if (missionEl) {
-      missionEl.textContent = state.missions.active
-        ? `${state.missions.active.title} — reach the yellow marker`
+    if (this.mission) {
+      this.mission.textContent = state.missions.active
+        ? `Chapter ${state.missions.active.id}: ${state.missions.active.title}`
         : state.missionIndex >= 7
-          ? 'All chapters done — the boat is waiting.'
-          : 'Press M for the next job';
+          ? 'Story complete — Solmara is yours'
+          : 'Press M for the next mission';
     }
-    const carEl = el('hud-car');
-    if (carEl) carEl.textContent = state.currentCar ? state.currentCar.def.name : 'On foot';
-    drawMinimap();
+    this.drawMap(state);
   }
 
-  function drawMinimap() {
-    if (!mctx || !canvas) return;
-    const W = canvas.width;
-    const H = canvas.height;
-    const scale = W / (CITY.half * 2 + 20);
-    const toMap = (x, z) => [W / 2 + x * scale, H / 2 + z * scale];
-    mctx.fillStyle = 'rgba(10, 10, 18, 0.85)';
-    mctx.fillRect(0, 0, W, H);
-    // Streets.
-    mctx.strokeStyle = 'rgba(140, 140, 170, 0.7)';
-    mctx.lineWidth = 2;
-    for (let k = -4; k <= 4; k++) {
-      const [x1, y1] = toMap(k * 40, -CITY.half);
-      const [x2, y2] = toMap(k * 40, CITY.half);
-      mctx.beginPath();
-      mctx.moveTo(x1, y1);
-      mctx.lineTo(x2, y2);
-      mctx.stroke();
-      const [x3, y3] = toMap(-CITY.half, k * 40);
-      const [x4, y4] = toMap(CITY.half, k * 40);
-      mctx.beginPath();
-      mctx.moveTo(x3, y3);
-      mctx.lineTo(x4, y4);
-      mctx.stroke();
+  drawMap(state) {
+    const ctx = this.mapCtx;
+    if (!ctx) return;
+    const S = 168;
+    const scale = S / WORLD.size;
+    const px = (v) => (v + WORLD.size / 2) * scale;
+    ctx.fillStyle = '#10131c';
+    ctx.fillRect(0, 0, S, S);
+    ctx.strokeStyle = '#2c3345';
+    ctx.lineWidth = 1;
+    for (let k = 0; k <= WORLD.size / WORLD.block; k++) {
+      const c = px(-WORLD.size / 2 + k * WORLD.block);
+      ctx.beginPath();
+      ctx.moveTo(c, 0);
+      ctx.lineTo(c, S);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, c);
+      ctx.lineTo(S, c);
+      ctx.stroke();
     }
-    // Shops.
-    mctx.fillStyle = '#ffe14d';
-    for (const shop of state.world.shops) {
-      const [x, y] = toMap(shop.x, shop.z);
-      mctx.fillRect(x - 3, y - 3, 6, 6);
-    }
-    // Mission beacon.
+    // Ocean.
+    ctx.fillStyle = '#0e2a44';
+    ctx.fillRect(0, 0, 8, S);
+    // Mission target.
     if (state.missions.active) {
-      const [x, y] = toMap(state.missions.active.target.x, state.missions.active.target.z);
-      mctx.fillStyle = '#ffe14d';
-      mctx.beginPath();
-      mctx.arc(x, y, 6, 0, Math.PI * 2);
-      mctx.fill();
-      mctx.strokeStyle = '#ffe14d';
-      mctx.beginPath();
-      mctx.arc(x, y, 10, 0, Math.PI * 2);
-      mctx.stroke();
+      const t = state.missions.active.target;
+      ctx.fillStyle = '#37e07a';
+      ctx.beginPath();
+      ctx.arc(px(t.x), px(t.z), 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#37e07a';
+      ctx.beginPath();
+      ctx.arc(px(t.x), px(t.z), 9, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // Parked cars.
+    ctx.fillStyle = '#e8b73a';
+    for (const c of state.vehicles.cars) {
+      ctx.fillRect(px(c.x) - 1.5, px(c.z) - 1.5, 3, 3);
     }
     // Cops.
-    mctx.fillStyle = '#ff2d55';
+    ctx.fillStyle = '#ff3b30';
     for (const cop of state.police.copCars) {
       if (!cop.active) continue;
-      const [x, y] = toMap(cop.x, cop.z);
-      mctx.beginPath();
-      mctx.arc(x, y, 3, 0, Math.PI * 2);
-      mctx.fill();
+      ctx.beginPath();
+      ctx.arc(px(cop.x), px(cop.z), 3, 0, Math.PI * 2);
+      ctx.fill();
     }
-    // Player arrow.
-    const [px, py] = toMap(state.player.pos.x, state.player.pos.z);
-    mctx.save();
-    mctx.translate(px, py);
-    mctx.rotate(state.player.heading);
-    mctx.fillStyle = '#ffffff';
-    mctx.beginPath();
-    mctx.moveTo(0, -6);
-    mctx.lineTo(4, 5);
-    mctx.lineTo(-4, 5);
-    mctx.closePath();
-    mctx.fill();
-    mctx.restore();
+    // Player.
+    const p = state.currentCar
+      ? { x: state.currentCar.x, z: state.currentCar.z }
+      : { x: state.player.pos.x, z: state.player.pos.z };
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(px(p.x), px(p.z), 3.5, 0, Math.PI * 2);
+    ctx.fill();
   }
-
-  let toastTimer = null;
-  function toast(msg, ms = 3500) {
-    const t = el('toast');
-    if (!t) return;
-    t.textContent = msg;
-    t.classList.add('show');
-    window.clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => t.classList.remove('show'), ms);
-  }
-
-  return { update, toast };
 }

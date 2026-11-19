@@ -1,67 +1,90 @@
-// The player on foot: a simple capsule figure, WASD movement relative to the
-// camera heading, with a third-person camera rig in main.js.
+// The player on foot: a simple walker who can steal any parked car with E.
+import * as THREE from '../vendor/three.module.min.js';
+import { PLAYER, WORLD, CAR } from './config.js';
 
-import * as THREE from 'three';
-import { PLAYER } from './config.js';
-
-export function createPlayer(scene) {
-  const group = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2a6fd4, roughness: 0.7 });
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 0.9, 4, 10), bodyMat);
+function makePlayerMesh() {
+  const g = new THREE.Group();
+  const jacket = new THREE.MeshStandardMaterial({ color: 0xd84a2a, roughness: 0.7 });
+  const pants = new THREE.MeshStandardMaterial({ color: 0x1e2430, roughness: 0.8 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xd9a077, roughness: 0.7 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.38, 0.95, 10), jacket);
   body.position.y = 1.05;
-  group.add(body);
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.28, 10, 8),
-    new THREE.MeshStandardMaterial({ color: 0xd9a986, roughness: 0.7 }),
-  );
-  head.position.y = 1.95;
-  group.add(head);
-  const jacket = new THREE.Mesh(
-    new THREE.BoxGeometry(0.85, 0.5, 0.45),
-    new THREE.MeshStandardMaterial({ color: 0x1a1a20, roughness: 0.6 }),
-  );
-  jacket.position.y = 1.35;
-  group.add(jacket);
-  scene.add(group);
+  g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), skin);
+  head.position.y = 1.78;
+  g.add(head);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.12, 12), pants);
+  cap.position.y = 1.98;
+  g.add(cap);
+  for (const x of [-0.16, 0.16]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.62, 8), pants);
+    leg.position.set(x, 0.31, 0);
+    g.add(leg);
+  }
+  return g;
+}
 
-  const pos = new THREE.Vector3(0, 0, 8);
-  group.position.copy(pos);
+export class Player {
+  constructor(scene) {
+    this.group = makePlayerMesh();
+    scene.add(this.group);
+    this.pos = new THREE.Vector3(2, 0, 6);
+    this.group.position.copy(this.pos);
+    this.heading = 0;
+    this.reserve = 24; // spare rounds
+    this.ammo = 12; // rounds in the magazine
+    this.health = 100;
+    this.walkBob = 0;
+  }
 
-  const player = {
-    group,
-    pos,
-    heading: 0,
-    health: 100,
-    armor: 0,
-    reserve: 0,
-    moving: false,
-    update(dt, input, cameraHeading) {
-      let mx = 0;
-      let mz = 0;
-      if (input.isHeld('KeyW')) mz -= 1;
-      if (input.isHeld('KeyS')) mz += 1;
-      if (input.isHeld('KeyA')) mx -= 1;
-      if (input.isHeld('KeyD')) mx += 1;
-      this.moving = mx !== 0 || mz !== 0;
-      if (!this.moving) return;
-      const len = Math.hypot(mx, mz);
-      mx /= len;
-      mz /= len;
-      // Movement is relative to where the camera looks: forward is -mz, right is +mx.
-      const sin = Math.sin(cameraHeading);
-      const cos = Math.cos(cameraHeading);
-      const wx = mx * cos - mz * sin;
-      const wz = -mx * sin - mz * cos;
-      const speed = input.isHeld('ShiftLeft') || input.isHeld('ShiftRight') ? PLAYER.runSpeed : PLAYER.walkSpeed;
-      pos.x += wx * speed * dt;
-      pos.z += wz * speed * dt;
-      pos.x = Math.max(-158, Math.min(158, pos.x));
-      pos.z = Math.max(-158, Math.min(158, pos.z));
-      this.heading = Math.atan2(wx, wz);
-      group.position.copy(pos);
-      group.rotation.y = this.heading;
-      group.position.y = Math.abs(Math.sin(performance.now() / 130)) * 0.05;
-    },
-  };
-  return player;
+  update(dt, input, state) {
+    if (state.currentCar) return; // driving is the car's job
+    const fwd = (input.isDown('KeyW') ? 1 : 0) - (input.isDown('KeyS') ? 1 : 0);
+    const strafe = (input.isDown('KeyD') ? 1 : 0) - (input.isDown('KeyA') ? 1 : 0);
+    if (fwd === 0 && strafe === 0) return;
+    const run = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
+    const speed = run ? PLAYER.runSpeed : PLAYER.walkSpeed;
+    const yaw = state.cameraYaw;
+    const sin = Math.sin(yaw);
+    const cos = Math.cos(yaw);
+    let dx = (sin * fwd + cos * strafe) * speed * dt;
+    let dz = (cos * fwd - sin * strafe) * speed * dt;
+    const len = Math.hypot(dx, dz);
+    if (len > speed * dt) {
+      dx = (dx / len) * speed * dt;
+      dz = (dz / len) * speed * dt;
+    }
+    this.pos.x += dx;
+    this.pos.z += dz;
+    const b = WORLD.size / 2 - 4;
+    this.pos.x = Math.max(-b, Math.min(b, this.pos.x));
+    this.pos.z = Math.max(-b, Math.min(b, this.pos.z));
+    this.heading = Math.atan2(dx, dz);
+    this.group.position.copy(this.pos);
+    this.group.rotation.y = this.heading;
+    this.walkBob += dt * 9;
+    this.group.position.y = Math.abs(Math.sin(this.walkBob)) * 0.06;
+  }
+
+  // E near a parked car: steal it. Returns the car or null.
+  tryEnterCar(state) {
+    const car = state.vehicles.nearestCar(this.pos.x, this.pos.z, CAR.enterRadius);
+    if (!car) return null;
+    if (!car.stolen) {
+      car.stolen = true;
+      if (state.wanted < 1) state.wanted = 1; // grand theft auto
+      state.toast(`Stole a ${car.def.name} — the law noticed`);
+    }
+    state.currentCar = car;
+    car.heading = this.heading;
+    return car;
+  }
+
+  exitCar(state) {
+    const car = state.currentCar;
+    if (!car) return;
+    state.currentCar = null;
+    this.pos.set(car.x + 2.5, 0, car.z + 1.5);
+    this.group.position.copy(this.pos);
+  }
 }
