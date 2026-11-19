@@ -1,136 +1,132 @@
-// SOLMARA tuning: every number the game balances on lives here, named so a
-// playtest can point at one value and change it. Speeds are world units per
-// second; 1 unit is about 1 metre, so km/h is speed x 3.6.
+// SOLMARA configuration: the city, the cars, the shops, the storm.
+// Solmara Bay is a 320 x 320 unit grid city. Streets run every 40 units; the
+// causeway bridge crosses the bay to the east. Units are metres; 1 u/s is 3.6 km/h.
 
 export const CITY = {
-  halfSize: 130,
-  roadLines: [-80, -40, 0, 40, 80],
-  roadWidth: 10,
-  blockCentres: [-60, -20, 20, 60],
-  beachZ: 104,
-  oceanZ: 118,
+  half: 160,
+  block: 40,
+  roadWidth: 12,
+  sidewalkWidth: 3,
 };
 
 export const PLAYER = {
-  walkSpeed: 6,
-  sprintSpeed: 9.5,
-  maxHealth: 150,
-  radius: 0.9,
-  magazineSize: 12,
-  startReserveAmmo: 48,
-  startCash: 400,
-  gunDamage: 25,
-  gunRange: 70,
+  walkSpeed: 6.5,
+  runSpeed: 9.5,
+  radius: 0.6,
+  eyeHeight: 1.7,
 };
 
-export const CAR_DEFS = {
-  sedan: { name: 'Coral Sedan', topSpeed: 30, accel: 13, turn: 1.9, color: 0x8a94a6, length: 4.4, width: 2.0 },
-  coupe: { name: 'Palma Coupe', topSpeed: 36, accel: 16, turn: 2.1, color: 0xc23b4e, length: 4.2, width: 1.9 },
-  marina: { name: 'Marina GT', topSpeed: 48, accel: 22, turn: 2.4, color: 0x2e9e8f, length: 4.5, width: 2.0 },
-  interceptor: { name: 'Interceptor', topSpeed: 52, accel: 26, turn: 2.6, color: 0x1c2733, length: 4.6, width: 2.0 },
-  taxi: { name: 'Solmara Cab', topSpeed: 32, accel: 14, turn: 2.0, color: 0xe8b93b, length: 4.4, width: 2.0 },
-  van: { name: 'Harbor Van', topSpeed: 26, accel: 11, turn: 1.7, color: 0x5b7fa6, length: 5.0, width: 2.1 },
+export const CAR = {
+  accel: 22, // u/s^2 — headless runs at ~1 fps, so the car must reach 10 u/s in ~1 s of game time
+  brake: 22,
+  reverseAccel: 8,
+  topSpeed: 43, // ~155 km/h
+  reverseTopSpeed: 12,
+  turnRate: 1.9, // rad/s at full lock, scaled by speed
+  drag: 0.15, // per-second proportional drag
+  enterRadius: 4.5,
 };
 
 export const POLICE = {
-  cruiserCount: 4,
+  maxCops: 6,
   baseTopSpeed: 36,
-  topSpeedPerStar: 3.2,
-  ramDamage: 6,
-  roadblockStars: 3,
+  topSpeedPerStar: 3.2, // cap at 4 stars: 48.8 u/s
+  accel: 14,
+  roadblockStars: 2, // roadblocks deploy at 2+ stars
+  chaseRadius: 260,
+  ramDamage: 0,
 };
 
-export const HURRICANE = {
-  totalDays: 7,
-  secondsPerDay: 420,
-};
+export const MISSIONS = [
+  {
+    id: 1,
+    title: 'Chapter 1 — The Pickup',
+    brief: 'Mara wants the ledger from the docks. Drive to the marker and bring it back — no noise, no witnesses.',
+    target: { x: 96, z: -84 },
+    reward: 500,
+  },
+  {
+    id: 2,
+    title: 'Chapter 2 — The Causeway Run',
+    brief: 'A courier is crossing the causeway at dusk. Intercept the drop before the Syndicate does.',
+    target: { x: -120, z: 120 },
+    reward: 650,
+  },
+  {
+    id: 3,
+    title: 'Chapter 3 — Neon Static',
+    brief: 'The radio tower on Meridian Row is broadcasting the Syndicate ledger. Shut it down.',
+    target: { x: 40, z: 120 },
+    reward: 800,
+  },
+  {
+    id: 4,
+    title: 'Chapter 4 — The Long Con',
+    brief: 'Pose as a buyer at the marina. The exchange happens at the far pier — be on time.',
+    target: { x: 128, z: 40 },
+    reward: 950,
+  },
+  {
+    id: 5,
+    title: 'Chapter 5 — Smoke Over Solmara',
+    brief: 'The storm surge is flooding the underpass. Get the crew out through the north gate.',
+    target: { x: -40, z: -120 },
+    reward: 1200,
+  },
+  {
+    id: 6,
+    title: 'Chapter 6 — Hollow Point',
+    brief: 'The Syndicate enforcer is holed up at the old casino. End the debt, one way or another.',
+    target: { x: -128, z: -40 },
+    reward: 1500,
+  },
+  {
+    id: 7,
+    title: 'Chapter 7 — The Last Boat',
+    brief: 'The hurricane makes landfall at dawn. One boat leaves the harbour. Be on it.',
+    target: { x: 128, z: 128 },
+    reward: 2500,
+  },
+];
 
 export const SHOPS = [
   {
     id: 'arms',
-    name: "Solmara Arms",
-    blurb: 'Guns, ammo and armour — no questions asked.',
+    name: 'Solmara Arms',
     x: -58,
     z: -46,
     items: [
-      { id: 'ammo', name: 'Ammo box', detail: '+48 reserve rounds', price: 150 },
-      { id: 'medkit', name: 'Med kit', detail: 'Restore 60 health', price: 100 },
-      { id: 'kevlar', name: 'Kevlar vest', detail: 'Enemy bullets hurt half as much', price: 300 },
+      { id: 'ammo', name: 'Ammo Box', desc: '+48 rounds', price: 150, apply: (s) => { s.player.reserve += 48; } },
+      { id: 'vest', name: 'Kevlar Vest', desc: 'Survive one more hit', price: 300, apply: (s) => { s.player.armor = Math.min(100, (s.player.armor ?? 0) + 50); } },
+      { id: 'repair', name: 'Full Repair', desc: 'Fix your ride up', price: 100, apply: (s) => { if (s.currentCar) s.currentCar.health = 100; } },
     ],
   },
   {
-    id: 'motors',
-    name: "Rico's Motors",
-    blurb: 'Tuning and fast cars, cash only.',
-    x: 58,
-    z: 46,
+    id: 'marina',
+    name: 'Marina General Store',
+    x: 84,
+    z: 96,
     items: [
-      { id: 'tuning', name: 'Engine tuning', detail: '+15% top speed on every car you drive', price: 800 },
-      { id: 'plating', name: 'Armour plating', detail: 'Your cars shrug off rams and bullets', price: 600 },
-      { id: 'marina', name: 'Marina GT', detail: 'Top speed 173 km/h — delivered beside you', price: 2000 },
-      { id: 'interceptor', name: 'Interceptor', detail: 'Top speed 187 km/h — delivered beside you', price: 3500 },
-    ],
-  },
-  {
-    id: 'clinic',
-    name: "Doc's Clinic",
-    blurb: 'Patch-ups for people who ask no questions.',
-    x: 44,
-    z: -58,
-    items: [
-      { id: 'medkit', name: 'Med kit', detail: 'Restore 60 health', price: 100 },
-      { id: 'kevlar', name: 'Kevlar vest', detail: 'Enemy bullets hurt half as much', price: 300 },
-      { id: 'ammo', name: 'Ammo box', detail: '+48 reserve rounds', price: 150 },
+      { id: 'ammo', name: 'Ammo Box', desc: '+48 rounds', price: 150, apply: (s) => { s.player.reserve += 48; } },
+      { id: 'snacks', name: 'Street Snacks', desc: 'Patch yourself up', price: 60, apply: (s) => { s.player.health = Math.min(100, (s.player.health ?? 100) + 30); } },
+      { id: 'repair', name: 'Full Repair', desc: 'Fix your ride up', price: 100, apply: (s) => { if (s.currentCar) s.currentCar.health = 100; } },
     ],
   },
 ];
 
-export const MISSIONS = [
-  {
-    id: 1, chapter: 'Chapter 1 — First Shift', title: 'First Shift',
-    giver: 'Mara Kessler',
-    brief: 'Mara needs a driver she can trust. Get to her garage on Coral Row and pick up the keys.',
-    target: { x: 0, z: -60 }, payout: 250, enemies: 0,
-  },
-  {
-    id: 2, chapter: 'Chapter 2 — Hot Wheels', title: 'Hot Wheels',
-    giver: 'Mara Kessler',
-    brief: 'A Marina GT is sitting in the boardwalk lot with the keys in it. Lift it — and deal with the lookout.',
-    target: { x: 40, z: 0 }, payout: 500, enemies: 1,
-  },
-  {
-    id: 3, chapter: 'Chapter 3 — Boardwalk Tax', title: 'Boardwalk Tax',
-    giver: 'Mara Kessler',
-    brief: 'The Hollow Point crew is shaking down the boardwalk stalls. Run them off, then collect what they took.',
-    target: { x: -40, z: 40 }, payout: 900, enemies: 2,
-  },
-  {
-    id: 4, chapter: 'Chapter 4 — The Drop', title: 'The Drop',
-    giver: 'Mara Kessler',
-    brief: 'A courier is bringing Syndicate cash through the marina. Intercept the drop and keep the money.',
-    target: { x: 80, z: -40 }, payout: 1200, enemies: 3,
-  },
-  {
-    id: 5, chapter: 'Chapter 5 — Syndicate Hit', title: 'Syndicate Hit',
-    giver: 'Mara Kessler',
-    brief: 'Three Hollow Point enforcers are waiting at the old depot. Take the fight to them.',
-    target: { x: -80, z: -80 }, payout: 1500, enemies: 3,
-  },
-  {
-    id: 6, chapter: 'Chapter 6 — Storm Surge', title: 'Storm Surge',
-    giver: 'Mara Kessler',
-    brief: 'The storm is one day out and the Syndicate is moving its stash. Hit the convoy before the rain does.',
-    target: { x: 0, z: 80 }, payout: 1800, enemies: 4,
-  },
-  {
-    id: 7, chapter: 'Chapter 7 — Landfall', title: 'Landfall',
-    giver: 'Mara Kessler',
-    brief: 'The hurricane makes landfall tonight. Six of the Syndicate’s best guard the boardwalk vault. Take it back.',
-    target: { x: 40, z: -80 }, payout: 4000, enemies: 6,
-  },
+export const CARS = [
+  { name: 'Vesper', color: 0xd43d2a, topSpeed: 43 },
+  { name: 'Comet GT', color: 0x2a6fd4, topSpeed: 45 },
+  { name: 'Solano', color: 0xe8c33a, topSpeed: 40 },
+  { name: 'Marauder', color: 0x222226, topSpeed: 44 },
+  { name: 'Palmetto', color: 0x3aa655, topSpeed: 39 },
+  { name: 'Interceptor', color: 0x11131a, topSpeed: 48 },
 ];
 
-export const SHOP_RADIUS = 14;
-export const MISSION_ARRIVE_RADIUS = 7;
-export const CAR_ENTER_RADIUS = 6;
-export const WANTED_DECAY_SECONDS = 20;
+export const HURRICANE = {
+  totalDays: 7,
+  startDay: 1,
+};
+
+export const SAVE_KEY = 'solmara-save-v2';
+export const START_CASH = 250;

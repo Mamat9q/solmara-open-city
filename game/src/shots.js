@@ -1,67 +1,78 @@
-// SOLMARA screenshot scenes: each one stages the real game from a fresh
-// world with the same seed, so the four pictures are honest renders of play
-// — the start screen, driving, a police chase, and a mission in progress.
+// Screenshot staging: ?shot=start|drive|chase|mission&seed=1 puts the game in a
+// photogenic state and raises window.__shotReady once a few frames have
+// rendered. The mission shot is staged on an open road with the beacon in view.
 
-import { Vehicle } from './vehicles.js';
-
-function freshGame(game) {
-  game.newGame();
-  game.screen = 'playing';
-  game.showScreen('playing');
+export function stageShot(state, shot) {
+  const s = state;
+  if (shot === 'start') {
+    s.setScreen('start');
+    s.camera.position.set(70, 42, 110);
+    s.camera.lookAt(0, 12, 0);
+    s.shotCamera = { x: 70, y: 42, z: 110 };
+    return true;
+  }
+  if (shot === 'drive' || shot === 'chase' || shot === 'mission') {
+    s.newGame();
+    // Put the player in the first parked car, on the long north avenue.
+    const car = s.vehicles.cars[0];
+    s.player.pos.set(car.x + 2, 0, car.z);
+    s.player.group.position.copy(s.player.pos);
+    s.enterCar();
+    if (shot === 'drive') {
+      car.heading = 0;
+      car.x = 0;
+      car.z = -100;
+      car.speed = 24;
+      car.mesh.position.set(car.x, 0, car.z);
+      car.mesh.rotation.y = car.heading;
+      s.player.pos.set(car.x, 0, car.z);
+      s.player.group.position.copy(s.player.pos);
+    } else if (shot === 'chase') {
+      car.heading = 0;
+      car.x = 0;
+      car.z = -60;
+      car.speed = 22;
+      car.mesh.position.set(car.x, 0, car.z);
+      car.mesh.rotation.y = car.heading;
+      s.player.pos.set(car.x, 0, car.z);
+      s.player.group.position.copy(s.player.pos);
+      s.wanted = 4;
+      for (let i = 0; i < 4; i++) s.police.update(0.5, s, s.audio);
+    } else if (shot === 'mission') {
+      const m = s.missions.start(s);
+      if (m) {
+        // Stage on the open road west of the target, looking at the beacon.
+        car.heading = Math.PI / 2;
+        car.x = m.target.x - 26;
+        car.z = m.target.z;
+        car.speed = 0;
+        car.mesh.position.set(car.x, 0, car.z);
+        car.mesh.rotation.y = car.heading;
+        s.player.pos.set(car.x, 0, car.z);
+        s.player.group.position.copy(s.player.pos);
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
-function putPlayerInCar(game, defKey, x, z, heading, speed) {
-  const car = new Vehicle(defKey, x, z, heading, false);
-  car.speed = speed;
-  game.scene.add(car.group);
-  game.vehicles.cars.push(car);
-  game.player.pos.set(x, 0, z);
-  game.player.heading = heading;
-  game.enterCar(car);
-  game.currentCar.speed = speed;
-  game.cameraYaw = heading;
-  game.updateCamera(0);
-  return car;
-}
-
-export function stageShot(name, game) {
-  const lower = (name || 'start').toLowerCase();
-  if (lower === 'drive') {
-    freshGame(game);
-    putPlayerInCar(game, 'marina', 0, 46, Math.PI, 26);
-    game.toast('Marina GT — 173 km/h on Coral Row.');
-    game.shotReady();
-    return;
-  }
-  if (lower === 'chase') {
-    freshGame(game);
-    game.hurricane.day = 4;
-    putPlayerInCar(game, 'interceptor', 0, 30, Math.PI, 34);
-    game.wanted = 4;
-    game.police.update(0.5, game, game.audio);
-    game.police.update(0.5, game, game.audio);
-    game.toast('Four stars — lose the cruisers before the roadblock.');
-    game.shotReady();
-    return;
-  }
-  if (lower === 'mission') {
-    freshGame(game);
-    game.hurricane.day = 2;
-    game.missions.start(0);
-    game.player.pos.set(0, 0, -34);
-    game.player.group.position.copy(game.player.pos);
-    game.player.heading = Math.PI;
-    game.cameraYaw = Math.PI;
-    game.updateCamera(0);
-    game.toast('Chapter 1 — First Shift: reach Mara’s garage.');
-    game.shotReady();
-    return;
-  }
-  // Start scene: the title over a live city at sunset.
-  game.newGame();
-  game.screen = 'start';
-  game.showScreen('start');
-  game.camera.position.set(38, 26, 96);
-  game.camera.lookAt(0, 6, -20);
-  game.shotReady();
+export function createShotWatcher() {
+  let stagedAt = 0;
+  let frames = 0;
+  return {
+    markStaged() {
+      stagedAt = performance.now();
+      frames = 0;
+    },
+    tick() {
+      frames++;
+      if (stagedAt > 0 && frames >= 3 && performance.now() - stagedAt > 1200) {
+        window.__shotReady = true;
+        stagedAt = 0;
+        return true;
+      }
+      return window.__shotReady === true;
+    },
+  };
 }

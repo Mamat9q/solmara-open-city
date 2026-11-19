@@ -1,27 +1,20 @@
-// SOLMARA dev server: serves the static game/ folder on localhost so the
-// game can be played and tested in a desktop browser. Usage:
-//
-//   node serve.ts            (serves on http://localhost:8080)
-//   node serve.ts --port 9000
-//
-// Node 22, standard library only. It never serves anything outside game/.
-
+// A tiny static server for game/ (Node 22, standard library only), so the game can be
+// played locally without a build step: `node serve.ts` serves game/ on
+// http://localhost:8080. It sends the MIME types a browser game needs, refuses any path
+// outside game/, and otherwise does nothing clever: this is a development convenience,
+// not a web server for the internet.
 import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const gameRoot = resolve(fileURLToPath(new URL('./game', import.meta.url)));
+const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
+const args = process.argv.slice(2);
+const portIndex = args.indexOf('--port');
+const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
+const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
 
-const cliArgs = process.argv.slice(2);
-const portFlag = cliArgs.indexOf('--port');
-const wantedPort = portFlag === -1 ? 8080 : Number(cliArgs[portFlag + 1]);
-const listenPort =
-  Number.isInteger(wantedPort) && wantedPort > 0 && wantedPort < 65536
-    ? wantedPort
-    : 8080;
-
-const typesByExtension = {
+const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
@@ -45,37 +38,36 @@ const typesByExtension = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-createServer((req, res) => {
-  const parsed = new URL(req.url ?? '/', 'http://localhost');
+createServer((request, response) => {
+  const url = new URL(request.url ?? '/', 'http://localhost');
   let pathname;
   try {
-    pathname = decodeURIComponent(parsed.pathname);
+    pathname = decodeURIComponent(url.pathname);
   } catch {
-    res.writeHead(400).end('bad request');
+    response.writeHead(400).end('bad request');
     return;
   }
   if (pathname.endsWith('/')) pathname += 'index.html';
-  const target = resolve(join(gameRoot, normalize(pathname)));
-  if (target !== gameRoot && !target.startsWith(gameRoot + sep)) {
-    res.writeHead(403).end('forbidden');
+  const file = resolve(join(root, normalize(pathname)));
+  if (file !== root && !file.startsWith(root + sep)) {
+    response.writeHead(403).end('forbidden');
     return;
   }
-  let byteSize;
+  let size;
   try {
-    const info = statSync(target);
-    if (!info.isFile()) throw new Error('not a file');
-    byteSize = info.size;
+    const stats = statSync(file);
+    if (!stats.isFile()) throw new Error('not a file');
+    size = stats.size;
   } catch {
-    res.writeHead(404).end('not found');
+    response.writeHead(404).end('not found');
     return;
   }
-  res.writeHead(200, {
-    'content-type':
-      typesByExtension[extname(target).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': byteSize,
+  response.writeHead(200, {
+    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
+    'content-length': size,
     'cache-control': 'no-store',
   });
-  createReadStream(target).pipe(res);
-}).listen(listenPort, '127.0.0.1', () => {
-  console.log(`SOLMARA is on http://localhost:${listenPort}`);
+  createReadStream(file).pipe(response);
+}).listen(port, '127.0.0.1', () => {
+  console.log(`game/ is on http://localhost:${port}`);
 });

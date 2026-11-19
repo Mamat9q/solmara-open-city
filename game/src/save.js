@@ -1,60 +1,59 @@
-// SOLMARA saving: version 2 in localStorage, holding the hurricane day,
-// mission progress, shop items, owned cars and the player's state. A version
-// 1 save, if one is ever found, loads through the same path.
+// Save / load: one localStorage key, version 2. The save holds cash, the
+// hurricane day, the mission index, owned shop items, the player's position
+// and health — everything Continue needs to restore a run.
 
-export const SAVE_KEY_V2 = 'solmara-save-v2';
-export const SAVE_KEY_V1 = 'solmara-save';
+import { SAVE_KEY } from './config.js';
 
-export function buildSaveData(game) {
-  return {
+export function saveGame(state) {
+  const data = {
     version: 2,
-    cash: game.cash,
-    missionIndex: game.missionIndex,
-    hurricaneDay: game.hurricane.day,
-    shopOwned: [...game.shopOwned],
-    ownedCars: game.vehicles.cars
-      .filter((car) => car.owned)
-      .map((car) => ({ defKey: car.defKey, x: car.x, z: car.z, heading: car.heading })),
+    cash: state.cash,
+    hurricaneDay: state.hurricane.day,
+    missionIndex: state.missionIndex,
+    shopOwned: [...state.shopOwned],
     player: {
-      x: game.player.pos.x,
-      z: game.player.pos.z,
-      heading: game.player.heading,
-      health: game.player.health,
-      ammo: game.player.ammo,
-      reserve: game.player.reserve,
+      x: state.player.pos.x,
+      z: state.player.pos.z,
+      heading: state.player.heading,
+      health: state.player.health ?? 100,
+      armor: state.player.armor ?? 0,
+      reserve: state.player.reserve,
     },
-    wanted: 0,
+    savedAt: Date.now(),
   };
-}
-
-export function writeSave(game) {
   try {
-    const data = buildSaveData(game);
-    window.localStorage.setItem(SAVE_KEY_V2, JSON.stringify(data));
+    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
   } catch {
     return false;
   }
 }
 
-export function readSave() {
+export function loadSave() {
   try {
-    const rawV2 = window.localStorage.getItem(SAVE_KEY_V2);
-    if (rawV2) {
-      const parsed = JSON.parse(rawV2);
-      if (parsed && typeof parsed === 'object') return { version: 2, data: parsed };
-    }
-    const rawV1 = window.localStorage.getItem(SAVE_KEY_V1);
-    if (rawV1) {
-      const parsed = JSON.parse(rawV1);
-      if (parsed && typeof parsed === 'object') return { version: 1, data: parsed };
-    }
+    const raw = window.localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || data.version !== 2) return null;
+    return data;
   } catch {
     return null;
   }
-  return null;
 }
 
 export function hasSave() {
-  return readSave() !== null;
+  return loadSave() !== null;
+}
+
+export function applySave(state, data) {
+  state.cash = data.cash;
+  state.hurricane.day = data.hurricaneDay;
+  state.missionIndex = data.missionIndex;
+  state.shopOwned = [...(data.shopOwned ?? [])];
+  state.player.pos.set(data.player.x, 0, data.player.z);
+  state.player.group.position.copy(state.player.pos);
+  state.player.heading = data.player.heading ?? 0;
+  state.player.health = data.player.health ?? 100;
+  state.player.armor = data.player.armor ?? 0;
+  state.player.reserve = data.player.reserve ?? 0;
 }

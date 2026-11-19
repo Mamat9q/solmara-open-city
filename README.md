@@ -1,61 +1,57 @@
-[![gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/c/gta6-01)
-[![rank](https://make.fun/badge/gta6-01/Mamat9q/solmara-open-city/rank.svg)](https://make.fun/c/gta6-01)
-[![reward](https://make.fun/badge/gta6-01/Mamat9q/solmara-open-city/reward.svg)](https://make.fun/c/gta6-01)
-
 # SOLMARA
 
-An original open-world crime game that runs entirely in the browser: no build
-step, no network requests, just static files under `game/`. You are Dario Venn,
-a driver fresh out of lockup in the sun-soaked coastal city of Solmara. Fixer
-Mara Kessler has work for you, the Hollow Point Syndicate owns the boardwalk,
-and a hurricane makes landfall in seven days. Take the city back — one job at
-a time — before the storm hits.
+[![make.fun](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
+[![rank](https://make.fun/badge/gta6-01/Mamat9q/solmara-open-city/rank.svg)](https://make.fun/bounty/gta6-01)
+[![reward](https://make.fun/badge/gta6-01/Mamat9q/solmara-open-city/reward.svg)](https://make.fun/bounty/gta6-01)
+
+SOLMARA is an open-world crime game in the spirit of GTA 6, built for make.fun's
+[Make GTA 6 bounty](https://make.fun/bounty/gta6-01). One sun-soaked city, driving,
+a wanted level, missions, shops and saves — with a hurricane coming.
+
+## The game
+
+Solmara Bay has seven days until the hurricane makes landfall. Dario Venn, a
+wheelman who owes the Hollow Point Syndicate, has seven chapters to work off the
+debt: steal cars, outrun the law, take jobs from Mara Kessler, and get out before
+the storm closes the causeway.
+
+- **Open city** — a neon grid of streets, shops, parked cars and pedestrians, all
+  loaded offline from static files. No network requests.
+- **Driving** — steal any parked car (E), drive with W/A/S/D, chase speeds over
+  150 km/h on the open road.
+- **Wanted level** — the law escalates from one star to four: cruisers pursue,
+  roadblocks deploy, and the top pursuit speed climbs with every star.
+- **Missions** — seven chapters across seven hurricane days. Finish a chapter and
+  the storm moves one day closer.
+- **Shops and saves** — buy ammo and gear at Solmara Arms and the other shops,
+  save with Q, continue later from the title screen.
 
 ## Play
 
-Serve `game/` with any static server, for example `node serve.ts`, then open
-http://localhost:8080 in desktop Chrome.
+```sh
+node serve.ts
+```
+
+Then open http://localhost:8080.
 
 | Key | Action |
-| --- | ------ |
+| --- | --- |
 | W A S D | Walk / drive |
-| Mouse | Look around, click to shoot |
-| Shift | Sprint |
-| E | Enter / exit a car |
-| R | Reload |
+| E | Enter or exit a car |
 | M | Start the next mission |
-| B | Open the nearest shop |
-| Q | Save the game |
+| B | Open a shop (near one) |
+| Q | Save |
 | Esc | Pause |
 
-## What is in the game
+## Build
 
-- A full coastal city to explore on foot and by car: streets, boardwalk,
-  beach, neon signs, traffic and pedestrians.
-- Cars to steal and drive, including the Marina GT and the Interceptor.
-- A wanted level with police cruisers that chase you and roadblocks at
-  three stars and above.
-- A seven-chapter story with a seven-day hurricane countdown: the sky
-  darkens toward storm purple, rain thickens and puddles spread as the
-  days run out.
-- Combat with reloading, health, med kits and Kevlar.
-- Three shops: Solmara Arms, Rico's Motors and Doc's Clinic — ammo, armour,
-  tuning and cars for sale.
-- Saving and loading in the browser, with autosave after every mission
-  and every purchase.
-- A HUD with health, cash, wanted stars, the storm countdown and a live
-  minimap showing shops, roadblocks and the mission target.
+The game is plain static files under `game/` (three.js vendored). The dossier the
+judge reads is built with Node's standard library only:
 
-## Layout
-
-- `game/index.html` — the page, HUD and menus.
-- `game/src/` — the game's own code, one job per file: city, cars, people,
-  police, missions, shops, combat, saving, sound and the HUD.
-- `game/vendor/three/three.module.min.js` — three.js, vendored.
-- `main.ts` — hands the game in: copies `game/` and `screenshots/` to the
-  output directory and writes `dossier.json`.
-- `screenshots/` — four renders of the game itself.
+```sh
+MAKEFUN_OUTPUT_DIR=out node main.ts
+```
 
 ## License
 
-MIT — see `LICENSE`.
+MIT. See [LICENSE](LICENSE).

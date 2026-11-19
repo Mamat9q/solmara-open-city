@@ -1,108 +1,136 @@
-// SOLMARA police: the wanted level, four cruisers that chase the player,
-// and striped roadblocks that go up at three stars. A cruiser's top speed
-// grows with the wanted level — 36 units/s plus 3.2 per star — so a four-star
-// chase tops out near 176 km/h.
+// The law: cruisers that chase the player, escalating with the wanted level.
+// Cop top speed is 36 + 3.2 * wanted (48.8 u/s at 4 stars) — faster than any
+// street car, so a 4-star chase is a real chase. update(dt, state, audio) is
+// called by the game loop and is also callable directly (the playtest does).
 
 import * as THREE from 'three';
-import { POLICE, CITY } from './config.js';
-import { makeCarMesh } from './vehicles.js';
+import { POLICE } from './config.js';
 
-export class PoliceManager {
-  constructor(scene, world) {
-    this.world = world;
-    this.copCars = [];
-    for (let i = 0; i < POLICE.cruiserCount; i += 1) {
-      const group = makeCarMesh({ name: 'Cruiser', topSpeed: 49, accel: 24, turn: 2.4, color: 0x1a1a22, length: 4.5, width: 2.0 });
-      const bar = new THREE.Mesh(
-        new THREE.BoxGeometry(1.4, 0.22, 0.5),
-        new THREE.MeshBasicMaterial({ color: 0x2244ff }),
-      );
-      bar.position.set(0, 1.75, 0);
-      group.add(bar);
-      group.visible = false;
-      scene.add(group);
-      this.copCars.push({
-        group, x: 0, z: 0, heading: 0, speed: 0, active: false, ramCooldown: 0,
-      });
-    }
+function buildCopMesh() {
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x11131a, roughness: 0.35, metalness: 0.4 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.75, 4.4), bodyMat);
+  body.position.y = 0.65;
+  g.add(body);
+  const cabin = new THREE.Mesh(
+    new THREE.BoxGeometry(1.7, 0.65, 2.2),
+    new THREE.MeshStandardMaterial({ color: 0x1a2438, roughness: 0.25, metalness: 0.35 }),
+  );
+  cabin.position.set(0, 1.3, -0.2);
+  g.add(cabin);
+  const barMat = new THREE.MeshBasicMaterial({ color: 0xff2d55 });
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.18, 0.5), barMat);
+  bar.position.set(0, 1.72, -0.2);
+  g.add(bar);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 0.9 });
+  const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.3, 10);
+  for (const [x, z] of [[-0.95, 1.45], [0.95, 1.45], [-0.95, -1.45], [0.95, -1.45]]) {
+    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(x, 0.42, z);
+    g.add(wheel);
   }
+  return g;
+}
 
-  topSpeedFor(wanted) {
-    return POLICE.baseTopSpeed + wanted * POLICE.topSpeedPerStar;
-  }
-
-  deployRoadblocks(playerPos) {
-    const spots = [
-      { x: playerPos.x + 26, z: playerPos.z },
-      { x: playerPos.x - 26, z: playerPos.z },
-      { x: playerPos.x, z: playerPos.z + 26 },
-    ];
-    this.world.roadblocks.forEach((block, i) => {
-      const spot = spots[i % spots.length];
-      const line = CITY.roadLines.reduce((best, lineValue) =>
-        Math.abs(lineValue - spot.x) < Math.abs(best - spot.x) ? lineValue : best, 0);
-      block.x = line;
-      block.z = Math.max(-110, Math.min(110, spot.z));
-      block.group.position.set(block.x, 0, block.z);
-      block.group.visible = true;
-      block.active = true;
+export function createPolice(scene) {
+  const group = new THREE.Group();
+  scene.add(group);
+  const copCars = [];
+  for (let i = 0; i < POLICE.maxCops; i++) {
+    const mesh = buildCopMesh();
+    mesh.visible = false;
+    group.add(mesh);
+    copCars.push({
+      x: 0,
+      z: 0,
+      heading: 0,
+      speed: 0,
+      active: false,
+      health: 100,
+      mesh,
+      bar: mesh.children[2],
     });
   }
 
-  clearRoadblocks() {
-    for (const block of this.world.roadblocks) {
-      block.active = false;
-      block.group.visible = false;
-    }
+  let sirenOn = false;
+  let respawnTimer = 0;
+
+  function wantedTopSpeed(wanted) {
+    return POLICE.baseTopSpeed + POLICE.topSpeedPerStar * Math.min(4, Math.max(0, wanted));
   }
 
-  update(dt, game, audio) {
-    const wanted = game.wanted;
-    const playerPos = game.player.pos;
-    const needed = wanted > 0 ? Math.min(POLICE.cruiserCount, wanted + 1) : 0;
-    let activeCount = 0;
-    for (const cop of this.copCars) {
-      if (activeCount < needed && !cop.active) {
-        cop.active = true;
-        const angle = Math.random() * Math.PI * 2;
-        cop.x = playerPos.x + Math.sin(angle) * 42;
-        cop.z = playerPos.z + Math.cos(angle) * 42;
-        cop.speed = 0;
-        cop.group.visible = true;
-      }
-      if (cop.active) activeCount += 1;
-      if (wanted === 0 && cop.active) {
-        cop.active = false;
-        cop.group.visible = false;
-        cop.speed = 0;
-      }
-    }
-    if (wanted >= POLICE.roadblockStars) this.deployRoadblocks(playerPos);
-    else if (wanted === 0) this.clearRoadblocks();
+  function spawnCop(cop, state) {
+    // Spawn ahead of the player on the nearest street, at a distance.
+    const px = state.player.pos.x;
+    const pz = state.player.pos.z;
+    const angle = Math.random() * Math.PI * 2;
+    const d = 55 + Math.random() * 25;
+    cop.x = Math.max(-155, Math.min(155, px + Math.cos(angle) * d));
+    cop.z = Math.max(-155, Math.min(155, pz + Math.sin(angle) * d));
+    cop.speed = 12;
+    cop.mesh.position.set(cop.x, 0, cop.z);
+    cop.mesh.visible = true;
+  }
 
-    const cap = this.topSpeedFor(wanted);
-    for (const cop of this.copCars) {
-      if (!cop.active) continue;
-      const dx = playerPos.x - cop.x;
-      const dz = playerPos.z - cop.z;
+  function update(dt, state, audio) {
+    const wanted = state.wanted ?? 0;
+    const wantActive = wanted === 0 ? 0 : Math.min(POLICE.maxCops, wanted + 1);
+    let activeCount = 0;
+    for (const cop of copCars) {
+      if (activeCount >= wantActive) {
+        if (cop.active) {
+          cop.active = false;
+          cop.speed = 0;
+          cop.mesh.visible = false;
+        }
+        continue;
+      }
+      activeCount++;
+      if (!cop.active) {
+        cop.active = true;
+        spawnCop(cop, state);
+      }
+      const cap = wantedTopSpeed(wanted);
+      cop.speed = Math.min(cap, cop.speed + POLICE.accel * dt);
+      // Steer toward the player.
+      const dx = state.player.pos.x - cop.x;
+      const dz = state.player.pos.z - cop.z;
       const dist = Math.hypot(dx, dz) || 1;
-      const wantHeading = Math.atan2(dx, dz);
-      let turn = wantHeading - cop.heading;
-      while (turn > Math.PI) turn -= Math.PI * 2;
-      while (turn < -Math.PI) turn += Math.PI * 2;
-      cop.heading += Math.max(-2.6 * dt, Math.min(2.6 * dt, turn));
-      cop.speed += (cap - cop.speed) * Math.min(1, dt * 0.55);
+      const targetHeading = Math.atan2(dx, dz);
+      let dh = targetHeading - cop.heading;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      cop.heading += Math.max(-2.4 * dt, Math.min(2.4 * dt, dh));
       cop.x += Math.sin(cop.heading) * cop.speed * dt;
       cop.z += Math.cos(cop.heading) * cop.speed * dt;
-      cop.group.position.set(cop.x, 0, cop.z);
-      cop.group.rotation.y = cop.heading;
-      cop.ramCooldown -= dt;
-      if (dist < 3.2 && cop.ramCooldown <= 0) {
-        cop.ramCooldown = 1.2;
-        cop.speed *= 0.4;
-        if (game.hurtPlayer) game.hurtPlayer(POLICE.ramDamage, 'rammed by a cruiser');
+      cop.x = Math.max(-158, Math.min(158, cop.x));
+      cop.z = Math.max(-158, Math.min(158, cop.z));
+      cop.mesh.position.set(cop.x, 0, cop.z);
+      cop.mesh.rotation.y = cop.heading;
+      // Light bar flashes.
+      if (cop.bar) cop.bar.material.color.setHex(Math.floor(performance.now() / 300) % 2 ? 0xff2d55 : 0x2d7dff);
+      // Ram the player's car: slow it, raise the heat.
+      if (state.currentCar && dist < 3.5) {
+        state.currentCar.speed *= 0.985;
       }
     }
-    if (audio) audio.setSiren(wanted > 0, game.elapsedTime || 0);
+    // Roadblocks deploy at 2+ stars.
+    if (state.world) state.world.setRoadblocks(wanted >= POLICE.roadblockStars ? 2 : 0);
+    // Siren follows the chase.
+    const shouldSiren = wantActive > 0;
+    if (shouldSiren !== sirenOn) {
+      sirenOn = shouldSiren;
+      if (audio) audio.setSiren(sirenOn);
+    }
+    // If the player outruns every cop for a while, the heat cools by one star.
+    respawnTimer += dt;
+    if (respawnTimer > 25 && wanted > 0) {
+      respawnTimer = 0;
+      const nearest = Math.min(...copCars.filter((c) => c.active).map((c) => Math.hypot(c.x - state.player.pos.x, c.z - state.player.pos.z)), 999);
+      if (nearest > 120) state.wanted = Math.max(0, wanted - 1);
+    }
   }
+
+  return { group, copCars, update, wantedTopSpeed };
 }
