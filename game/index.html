@@ -1,100 +1,75 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SOLMARA — open-city crime game</title>
 <link rel="icon" href="data:,">
+<title>SOLMARA — Open-City Crime</title>
 <style>
-  html, body { margin: 0; padding: 0; background: #0c0a14; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; }
-  #wrap { position: relative; width: 1280px; height: 720px; margin: 0 auto; }
-  canvas#game { display: block; width: 1280px; height: 720px; background: #1a1030; }
-  .hidden { display: none !important; }
-  #hud { position: absolute; inset: 0; pointer-events: none; color: #fff; }
-  #hud-top { position: absolute; top: 0; left: 0; right: 0; display: flex; gap: 18px; padding: 10px 14px;
-    background: linear-gradient(rgba(8,6,18,.85), rgba(8,6,18,0)); font-size: 15px; font-weight: 600; }
-  #hud-stars { color: #ffd24a; letter-spacing: 2px; }
-  #hud-stars.hot { color: #ff4040; }
-  #hud-speed { margin-left: auto; }
-  #hud-objective { position: absolute; top: 44px; left: 14px; font-size: 14px; color: #bfe9c8;
-    text-shadow: 0 1px 3px #000; max-width: 560px; }
-  #hud-ammo { position: absolute; bottom: 12px; left: 14px; font-size: 14px; color: #dfe6ff; text-shadow: 0 1px 3px #000; }
-  #minimap { position: absolute; right: 12px; bottom: 12px; width: 180px; height: 180px;
-    border: 2px solid rgba(255,255,255,.35); border-radius: 6px; background: #0c0a14; }
-  #hud-toast { position: absolute; bottom: 64px; left: 50%; transform: translateX(-50%);
-    background: rgba(10,8,20,.9); border: 1px solid #39ff6a; color: #d9ffe2; padding: 8px 16px;
-    border-radius: 6px; font-size: 14px; white-space: nowrap; }
-  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; color: #fff; background: rgba(8,6,18,.72); text-align: center; }
-  .screen h1 { font-size: 64px; margin: 0 0 4px; letter-spacing: 10px; color: #ff5a7a;
-    text-shadow: 0 0 24px rgba(255,42,122,.8), 0 2px 0 #000; }
-  .screen h2 { font-size: 22px; margin: 0 0 10px; color: #ffe14a; }
-  .screen p { font-size: 15px; max-width: 520px; margin: 6px 0; color: #dfe6ff; line-height: 1.5; }
-  .screen button { pointer-events: auto; margin: 8px 6px 0; padding: 10px 22px; font-size: 16px;
-    font-weight: 700; color: #0c0a14; background: #39ff6a; border: 0; border-radius: 6px; cursor: pointer; }
-  .screen button.secondary { background: #2c2838; color: #fff; border: 1px solid #6a6288; }
-  .screen button:disabled { opacity: .45; cursor: default; }
-  .keys { font-size: 13px; color: #9a93b8; margin-top: 12px; line-height: 1.7; }
-  #shop-items { width: 420px; margin: 10px 0; }
-  .shop-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 4px;
-    border-bottom: 1px solid rgba(255,255,255,.15); font-size: 15px; }
-  .shop-row button { margin: 0; padding: 6px 14px; font-size: 14px; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1026;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #eef1f5; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  #hud-tl { position: absolute; top: 14px; left: 16px; text-shadow: 0 1px 4px #000; }
+  .hud-line { font-size: 20px; font-weight: 700; }
+  .hud-line.small { font-size: 14px; font-weight: 600; opacity: .92; }
+  .hud-bar { width: 170px; height: 6px; background: rgba(0,0,0,.55); border-radius: 3px; margin-top: 4px; }
+  #hud-respect { height: 100%; width: 0%; background: #2fd95f; border-radius: 3px; }
+  #hud-tr { position: absolute; top: 14px; right: 16px; text-align: right; text-shadow: 0 1px 4px #000; }
+  #hud-stars { font-size: 26px; letter-spacing: 2px; }
+  .star { color: rgba(255,255,255,.25); }
+  .star.on { color: #ffd23f; text-shadow: 0 0 8px #ff9a00; }
+  #hud-bl { position: absolute; left: 16px; bottom: 16px; }
+  #minimap { border: 2px solid rgba(255,255,255,.35); border-radius: 50%; background: rgba(8,12,20,.8); }
+  #hud-district { text-align: center; font-size: 13px; font-weight: 700; margin-top: 4px; text-shadow: 0 1px 4px #000; }
+  #hud-bc { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); text-align: center; width: 560px; }
+  #hud-objective { font-size: 17px; font-weight: 700; text-shadow: 0 1px 4px #000, 0 0 12px #000; }
+  #hud-sub { font-size: 14px; color: #ffd23f; text-shadow: 0 1px 4px #000; margin-top: 2px; }
+  #hud-br { position: absolute; right: 16px; bottom: 16px; text-align: right; text-shadow: 0 1px 4px #000; }
+  #hud-speed { font-size: 26px; font-weight: 800; }
+  #hud-wheel { margin: 6px 0; }
+  .wslot { font-size: 12px; font-weight: 700; padding: 3px 7px; margin-left: 4px; border-radius: 4px;
+    background: rgba(0,0,0,.55); color: #cfd3d8; }
+  .wslot.on { background: #ffd23f; color: #111; }
+  #hud-hint { font-size: 11px; opacity: .75; max-width: 340px; }
+  #hud-toast { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.72);
+    padding: 9px 18px; border-radius: 6px; font-size: 16px; font-weight: 600; opacity: 0; transition: opacity .25s; white-space: nowrap; }
+  #hud-toast.show { opacity: 1; }
+  #hud-banner { position: absolute; top: 32%; left: 50%; transform: translateX(-50%); text-align: center;
+    opacity: 0; transition: opacity .4s; pointer-events: none; }
+  #hud-banner.show { opacity: 1; }
+  #hud-banner-title { font-size: 40px; font-weight: 900; letter-spacing: 2px; text-shadow: 0 2px 10px #000; }
+  #hud-banner-sub { font-size: 16px; text-shadow: 0 1px 6px #000; }
+  #hud-panel { position: absolute; inset: 0; display: none; pointer-events: auto; background: rgba(4,6,14,.55); }
+  #hud-start { position: absolute; inset: 0; display: none; pointer-events: auto; background: rgba(4,6,14,.45); overflow: auto; }
+  .panel { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 860px; max-width: 94vw;
+    max-height: 92vh; overflow: auto; background: rgba(10,14,26,.94); border: 1px solid #3a4356; border-radius: 12px;
+    padding: 18px 24px; box-shadow: 0 10px 60px #000; }
+  .panel.start { width: 920px; }
+  .panel h1 { margin: 0; font-size: 54px; letter-spacing: 6px; color: #ffd23f; text-shadow: 0 0 24px rgba(255,122,60,.7); }
+  .panel h2 { margin: 0 0 10px; font-size: 26px; color: #ffd23f; }
+  .panel h3 { margin: 12px 0 6px; font-size: 15px; color: #7fb5ff; }
+  .tag { font-size: 14px; opacity: .9; margin: 2px 0 8px; }
+  .cols { display: flex; gap: 26px; }
+  .cols > div { flex: 1; }
+  .mlist { font-size: 13px; line-height: 1.5; }
+  .mrow { font-size: 14px; line-height: 1.55; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.07); }
+  .keys { font-size: 13px; line-height: 1.65; opacity: .95; }
+  .cta { margin-top: 14px; font-size: 17px; font-weight: 800; color: #2fd95f; text-align: center; }
+  .fine { margin-top: 6px; font-size: 12px; opacity: .7; text-align: center; }
+  button { pointer-events: auto; cursor: pointer; background: #ffd23f; color: #111; border: 0; border-radius: 5px;
+    font-weight: 700; padding: 4px 10px; margin-left: 6px; font-size: 13px; }
+  button:hover { background: #ffe27a; }
 </style>
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.min.js" } }
 </script>
 </head>
 <body>
-<div id="wrap">
-  <canvas id="game" width="1280" height="720"></canvas>
-  <div id="hud" class="hidden">
-    <div id="hud-top">
-      <span id="hud-cash">$500</span>
-      <span id="hud-day">Day 1 / 7 — First Light</span>
-      <span id="hud-stars">☆☆☆☆☆</span>
-      <span id="hud-speed">0 km/h</span>
-    </div>
-    <div id="hud-objective"></div>
-    <div id="hud-ammo"></div>
-    <canvas id="minimap" width="180" height="180"></canvas>
-    <div id="hud-toast" class="hidden"></div>
-  </div>
-
-  <div id="screen-title" class="screen">
-    <h1>SOLMARA</h1>
-    <h2>Seven days until the hurricane makes landfall.</h2>
-    <p>Neon avenues, a stolen Vesper GT, and a crew counting on you. Run the
-    jobs, outrun the police, and get out before the storm eats the city.</p>
-    <div>
-      <button id="btn-new">New Game</button>
-      <button id="btn-continue" class="secondary">Continue</button>
-    </div>
-    <div class="keys">WASD drive / walk &nbsp;·&nbsp; E get in &amp; out &nbsp;·&nbsp; F shoot &nbsp;·&nbsp; B shop &nbsp;·&nbsp; Q save &nbsp;·&nbsp; Esc pause</div>
-  </div>
-
-  <div id="screen-pause" class="screen hidden">
-    <h2>Paused</h2>
-    <p>The storm waits for no one — but it will wait for you.</p>
-    <div>
-      <button id="btn-resume">Resume</button>
-      <button id="btn-save" class="secondary">Save</button>
-      <button id="btn-title" class="secondary">Title Screen</button>
-    </div>
-  </div>
-
-  <div id="screen-shop" class="screen hidden">
-    <h2>Night Market</h2>
-    <p>Cash only. No refunds once the hurricane hits.</p>
-    <div id="shop-items"></div>
-    <div><button id="btn-shop-close">Back to the streets</button></div>
-  </div>
-
-  <div id="screen-over" class="screen hidden">
-    <h1 id="over-title">BUSTED</h1>
-    <p id="over-text"></p>
-    <div><button id="btn-restart">Run it back</button></div>
-  </div>
-</div>
+<canvas id="game" aria-label="SOLMARA: drive, steal cars, outrun the police and finish 10 story missions before Hurricane Mara lands"></canvas>
+<div id="hud"></div>
+<p id="status" role="status" aria-live="polite"></p>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

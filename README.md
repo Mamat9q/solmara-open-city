@@ -1,31 +1,75 @@
-# SOLMARA
+# SOLMARA — Open-City Crime
 
-An open-world crime game set in Solmara, a neon coastal city counting down
-seven days to a category-five hurricane. Drive the avenues, outrun the
-police, run jobs for the crew, and stock up before the storm makes landfall.
+An original 3D open-world crime game that runs offline in a desktop browser from
+static files. Built for the make.fun competition **gta6-01 — "Make GTA 6"**.
+Everything is original: the city of Solmara, its characters, vehicles, story,
+art and music. No Rockstar names, maps or assets.
 
-## Play
+## The game
 
-- Open `game/index.html` in a desktop browser (or run `node serve.ts` and
-  visit http://localhost:8080). No build step, no network requests.
-- **W A S D / arrows** — drive or walk. **E** — get in / out of a car.
-  **F / click** — shoot on foot. **B** — shop. **Q** — save. **Esc** — pause.
-- Seven chapters, one per day: reach the green waypoint beacon to finish a
-  job and earn cash. Wanted stars bring police cruisers; lose them by laying
-  low. Buy ammo, armor, repairs and nitro at the shop.
+Hurricane Mara makes landfall in 7 days. You are a driver for hire in Solmara —
+steal cars, outrun the police, and finish **10 story missions across 7 chapters**
+before the storm hits. Then keep playing: taxi fares, street races and delivery
+runs pay for garage upgrades and better weapons.
 
-## Shots
+- **City** — 7 named districts (Downtown, Old Town, Eastside, North Hills, Port
+  Solmara, Marina Bay, Sunset Beach), a beachfront, a working port, 190+
+  buildings, traffic (14 cars) and pedestrians (24) with headlights at night.
+- **Driving** — arcade handling (accel 22, drag 0.15), carjacking (E), top speed
+  up to 155+ km/h in the Harbor GT.
+- **Wanted system** — 1–2 stars: patrol cars; 3 stars: roadblocks; 4–5 stars:
+  the AIR-1 helicopter and spike strips. Lay low to cool the heat ("EVADING").
+- **Missions** — 10 story missions with waypoint beacons, objectives and
+  payouts, plus taxi fares (T), 3 race routes (R) and timed deliveries (Y).
+- **Garage (G)** — own 3 cars, buy engine/armor upgrades and 5 paints with
+  mission cash. **Weapon shop (B)** — pistol, SMG, shotgun, ammo, health kits.
+- **Combat** — weapon wheel on keys 1/2/3, hitscan shooting, ammo + health
+  pickups around the city.
+- **Radio (C)** — 3 synth stations (NEON FM, HARBOR JAZZ, STORM ROCK), all
+  synthesized live with WebAudio — no audio files.
+- **Day/night + rain** — a full day cycle, sunset, and rain that wets the
+  streets (glossy sheen, darker sky, heavier storm as the 7 days pass).
+- **HUD + minimap** — cash, respect rank, wanted stars, weapon/ammo, health,
+  radio, speed, mission objective with waypoint distance, and a live minimap
+  showing roads, traffic, police and the waypoint.
+- **Save (K)** — progress autosaves after every mission and loads on start.
 
-`screenshots/` holds four renders taken in the browser at 1280x720:
-`1-start.jpg` (title over the city at sunset), `2-drive.jpg` (avenue run),
-`3-chase.jpg` (four-star pursuit), `4-mission.jpg` (waypoint beacon).
-The scenes are staged by `game/src/shots.js` from `?shot=` queries in
-`shots.json`, playing the real rules forward from a fixed seed.
+## Controls
 
-## Build
+| Key | Action |
+| --- | --- |
+| W A S D / arrows | Drive / walk |
+| Mouse | Look (drag, or pointer lock on click) |
+| E | Enter car / steal a nearby car / exit car |
+| Click | Shoot |
+| 1 / 2 / 3 | Pistol / SMG / shotgun |
+| M | Start next story mission |
+| T / R / Y | Taxi fare / street race / delivery run |
+| G | Garage — cars, upgrades, paint |
+| B | Weapon shop |
+| C | Switch radio station |
+| K | Save game |
+| P / Esc | Pause |
 
-`node main.ts` (with `MAKEFUN_OUTPUT_DIR` set) copies `game/` and
-`screenshots/` to the output directory and writes `dossier.json`.
+## Play it
 
-Three.js r187 is vendored under `game/vendor/`; the make.fun game library
-lives in `vendor/makefun-game.ts`. MIT licensed.
+```sh
+node serve.ts
+# open http://localhost:8080
+```
+
+No build step, no network requests, no install. three.js r187 is vendored under
+`game/vendor/`. The game is ES modules under `game/src/`, one file per system:
+`world`, `player`, `vehicles`, `traffic`, `police`, `missions`, `combat`, `hud`,
+`audio`, `save`, `input`, `effects`, `main`, `shop`, `hurricane`, `shots`.
+
+## Hand it in
+
+```sh
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+# prints "SOLMARA handed in" and writes out/dossier.json
+```
+
+## License
+
+MIT — see `LICENSE`.

@@ -1,43 +1,37 @@
-// The shop: four items, cash-checked purchases, immediate effects on the
-// run state. The shop pauses the action while it is open.
-import { SHOP_ITEMS } from './config.js';
+// The weapon shop: buy the SMG / shotgun, buy ammo for any owned weapon, buy a
+// health kit. All prices come from config; all purchases check the cash first.
 
-export class Shop {
-  constructor(hud, audio) {
-    this.hud = hud;
-    this.audio = audio;
-    this.open = false;
+import { WEAPONS } from './config.js';
+
+export function createShop(G) {
+  function buyWeapon(id) {
+    const w = WEAPONS[id];
+    if (!w) return { ok: false, msg: 'No such weapon.' };
+    if (G.state.ownedWeapons.includes(id)) return { ok: false, msg: `You already own the ${w.name}.` };
+    if (G.state.cash < w.price) return { ok: false, msg: `Need $${w.price} for the ${w.name}.` };
+    G.state.cash -= w.price;
+    G.state.ownedWeapons.push(id);
+    G.state.ammo += Math.floor(w.ammoMax / 2);
+    return { ok: true, msg: `${w.name} bought — press ${w.key} to equip it.` };
   }
 
-  get items() {
-    return SHOP_ITEMS;
+  function buyAmmo(id) {
+    const w = WEAPONS[id];
+    if (!w) return { ok: false, msg: 'No such weapon.' };
+    if (!G.state.ownedWeapons.includes(id)) return { ok: false, msg: `Buy the ${w.name} first.` };
+    if (G.state.cash < w.ammoPrice) return { ok: false, msg: `Need $${w.ammoPrice} for ammo.` };
+    G.state.cash -= w.ammoPrice;
+    G.state.ammo = Math.min(w.ammoMax * 2, G.state.ammo + 30);
+    return { ok: true, msg: `+30 ${w.name} ammo.` };
   }
 
-  openShop(state) {
-    this.open = true;
-    this.hud.renderShop(SHOP_ITEMS, state.cash, (id) => this.buy(id, state));
-    this.hud.show('shop');
+  function buyHealth() {
+    if (G.state.cash < 150) return { ok: false, msg: 'Need $150 for a health kit.' };
+    if (G.state.health >= 100) return { ok: false, msg: 'Health is already full.' };
+    G.state.cash -= 150;
+    G.state.health = Math.min(100, G.state.health + 50);
+    return { ok: true, msg: 'Health +50.' };
   }
 
-  closeShop() {
-    this.open = false;
-  }
-
-  // Applies a purchase to `state` (the game's run state). Returns a message.
-  buy(id, state) {
-    const item = SHOP_ITEMS.find((i) => i.id === id);
-    if (!item) return 'No such item.';
-    if (state.cash < item.price) return 'Not enough cash.';
-    state.cash -= item.price;
-    if (id === 'ammo') state.ammo = Math.min(240, state.ammo + 48);
-    if (id === 'armor') state.armor = Math.min(100, state.armor + 50);
-    if (id === 'repair') state.carHealth = 100;
-    if (id === 'nitro') {
-      state.owned.push('nitro');
-      state.nitroTanks = (state.nitroTanks || 0) + 1;
-    }
-    this.audio.cash();
-    this.hud.renderShop(SHOP_ITEMS, state.cash, (next) => this.buy(next, state));
-    return `${item.name} bought.`;
-  }
+  return { buyWeapon, buyAmmo, buyHealth };
 }

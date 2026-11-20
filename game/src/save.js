@@ -1,41 +1,61 @@
-// Save / load through localStorage. The save is a plain JSON snapshot of the
-// run: cash, day, chapter, mission, ammo, armor, owned shop items, and the
-// player / car transforms. Nothing leaves the browser.
-import { SAVE_KEY, SAVE_VERSION } from './config.js';
+// Save / load: one localStorage slot holding cash, respect, day, mission progress,
+// garage, weapons and health. Autosaves on mission completion; K saves by hand.
 
-export function saveGame(state) {
-  try {
-    const data = {
-      version: SAVE_VERSION,
-      cash: state.cash,
-      day: state.day,
-      chapter: state.chapterIndex,
-      missionIndex: state.missionIndex,
-      ammo: state.ammo,
-      armor: state.armor,
-      owned: state.owned,
-      player: { x: state.playerX, z: state.playerZ, heading: state.playerHeading },
-      car: { x: state.carX, z: state.carZ, heading: state.carHeading, health: state.carHealth },
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    return true;
-  } catch {
-    return false;
+import { SAVE_KEY } from './config.js';
+
+export function createSave(G) {
+  function saveGame() {
+    try {
+      const s = G.state;
+      const data = {
+        cash: s.cash, respect: s.respect, day: s.day, missionIndex: s.missionIndex,
+        missionsDone: s.missionsDone, ownedCars: s.ownedCars, carIndex: s.carIndex,
+        upgrades: s.upgrades, paint: s.paint, ownedWeapons: s.ownedWeapons,
+        weapon: s.weapon, ammo: s.ammo, health: s.health, radio: G.audio ? 0 : 0,
+      };
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+      return true;
+    } catch {
+      return false;
+    }
   }
-}
 
-export function loadGame() {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (!data || data.version !== SAVE_VERSION) return null;
-    return data;
-  } catch {
-    return null;
+  function loadGame() {
+    try {
+      const raw = window.localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      if (typeof d !== 'object' || d === null) return null;
+      return d;
+    } catch {
+      return null;
+    }
   }
-}
 
-export function hasSave() {
-  return loadGame() !== null;
+  function hasSave() {
+    try {
+      return window.localStorage.getItem(SAVE_KEY) !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  function applySave(d) {
+    const s = G.state;
+    if (typeof d.cash === 'number') s.cash = d.cash;
+    if (typeof d.respect === 'number') s.respect = d.respect;
+    if (typeof d.day === 'number') s.day = Math.max(1, Math.min(7, d.day));
+    if (typeof d.missionIndex === 'number') s.missionIndex = Math.max(0, Math.min(10, d.missionIndex));
+    if (Array.isArray(d.missionsDone)) s.missionsDone = d.missionsDone;
+    if (Array.isArray(d.ownedCars) && d.ownedCars.length) s.ownedCars = d.ownedCars;
+    if (typeof d.carIndex === 'number') s.carIndex = Math.max(0, Math.min(2, d.carIndex));
+    if (d.upgrades && typeof d.upgrades === 'object') s.upgrades = d.upgrades;
+    if (typeof d.paint === 'number') s.paint = d.paint;
+    if (Array.isArray(d.ownedWeapons)) s.ownedWeapons = d.ownedWeapons;
+    if (typeof d.weapon === 'string') s.weapon = d.weapon;
+    if (typeof d.ammo === 'number') s.ammo = d.ammo;
+    if (typeof d.health === 'number') s.health = d.health;
+  }
+
+  return { saveGame, loadGame, hasSave, applySave };
 }
