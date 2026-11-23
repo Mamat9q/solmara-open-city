@@ -1,61 +1,68 @@
-// Save / load: one localStorage slot holding cash, respect, day, mission progress,
-// garage, weapons and health. Autosaves on mission completion; K saves by hand.
+// Save / load: one JSON blob in localStorage holding money, respect, owned cars
+// and upgrades, weapons and ammo, mission progress, the day and the player's
+// position. Saving never throws (private windows, full storage) — it just skips.
+import { SAVE_KEY, START_CASH, START_HEALTH } from './config.js';
 
-import { SAVE_KEY } from './config.js';
+export function defaultSave() {
+  return {
+    money: START_CASH,
+    respect: 0,
+    day: 1,
+    carId: 'dune',
+    ownedCars: ['dune'],
+    upgrades: [],
+    engineLevel: 0,
+    armor: false,
+    paintIndex: 0,
+    ownedWeapons: ['pistol'],
+    ammo: { pistol: 60, smg: 0, shotgun: 0 },
+    weapon: 'pistol',
+    missionIndex: 0,
+    missionsDone: [],
+    health: START_HEALTH,
+    px: 0, pz: 40,
+  };
+}
 
-export function createSave(G) {
-  function saveGame() {
-    try {
-      const s = G.state;
-      const data = {
-        cash: s.cash, respect: s.respect, day: s.day, missionIndex: s.missionIndex,
-        missionsDone: s.missionsDone, ownedCars: s.ownedCars, carIndex: s.carIndex,
-        upgrades: s.upgrades, paint: s.paint, ownedWeapons: s.ownedWeapons,
-        weapon: s.weapon, ammo: s.ammo, health: s.health, radio: G.audio ? 0 : 0,
-      };
-      window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-      return true;
-    } catch {
-      return false;
-    }
+export function loadSave() {
+  try {
+    const raw = window.localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || typeof data.money !== 'number') return null;
+    return { ...defaultSave(), ...data };
+  } catch {
+    return null;
   }
+}
 
-  function loadGame() {
-    try {
-      const raw = window.localStorage.getItem(SAVE_KEY);
-      if (!raw) return null;
-      const d = JSON.parse(raw);
-      if (typeof d !== 'object' || d === null) return null;
-      return d;
-    } catch {
-      return null;
-    }
+export function writeSave(state) {
+  try {
+    const data = {
+      money: state.money,
+      respect: state.respect,
+      day: state.day,
+      carId: state.carId,
+      ownedCars: state.ownedCars,
+      upgrades: state.upgrades,
+      engineLevel: state.engineLevel || 0,
+      armor: !!state.armor,
+      paintIndex: state.paintIndex || 0,
+      ownedWeapons: state.ownedWeapons,
+      ammo: state.ammo,
+      weapon: state.weapon,
+      missionIndex: state.missions.index,
+      missionsDone: [...state.missions.completed],
+      health: state.health,
+      px: state.player.mesh.position.x,
+      pz: state.player.mesh.position.z,
+    };
+    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch {
+    // Storage unavailable: the session keeps playing, nothing is saved.
   }
+}
 
-  function hasSave() {
-    try {
-      return window.localStorage.getItem(SAVE_KEY) !== null;
-    } catch {
-      return false;
-    }
-  }
-
-  function applySave(d) {
-    const s = G.state;
-    if (typeof d.cash === 'number') s.cash = d.cash;
-    if (typeof d.respect === 'number') s.respect = d.respect;
-    if (typeof d.day === 'number') s.day = Math.max(1, Math.min(7, d.day));
-    if (typeof d.missionIndex === 'number') s.missionIndex = Math.max(0, Math.min(10, d.missionIndex));
-    if (Array.isArray(d.missionsDone)) s.missionsDone = d.missionsDone;
-    if (Array.isArray(d.ownedCars) && d.ownedCars.length) s.ownedCars = d.ownedCars;
-    if (typeof d.carIndex === 'number') s.carIndex = Math.max(0, Math.min(2, d.carIndex));
-    if (d.upgrades && typeof d.upgrades === 'object') s.upgrades = d.upgrades;
-    if (typeof d.paint === 'number') s.paint = d.paint;
-    if (Array.isArray(d.ownedWeapons)) s.ownedWeapons = d.ownedWeapons;
-    if (typeof d.weapon === 'string') s.weapon = d.weapon;
-    if (typeof d.ammo === 'number') s.ammo = d.ammo;
-    if (typeof d.health === 'number') s.health = d.health;
-  }
-
-  return { saveGame, loadGame, hasSave, applySave };
+export function clearSave() {
+  try { window.localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
 }

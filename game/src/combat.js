@@ -1,145 +1,181 @@
-// Combat: the weapon wheel (1 pistol, 2 SMG, 3 shotgun), hitscan shooting at
-// police and pedestrians, ammo + health pickups scattered around the city.
-// Shooting a cop is a crime; shooting a pedestrian is a bigger one.
-
+// Combat: the weapon wheel (pistol / SMG / shotgun), raycast shooting with
+// spread and pellets, rival gang members for the shootout missions, and health
+// and ammo pickups scattered around the city.
 import * as THREE from 'three';
-import { WEAPONS } from './config.js';
+import { WEAPONS, CITY_HALF } from './config.js';
 import { range } from './random.js';
+import { addWanted } from './police.js';
 
-export function createCombat(G) {
-  const pickups = [];
-  const group = new THREE.Group();
-  G.scene.add(group);
-  let cooldown = 0;
+const RIVAL_COLOR = 0x3a2a4a;
 
-  function spawnPickup(kind) {
-    const p = G.world.randomRoadPoint();
-    const mesh = new THREE.Group();
-    const color = kind === 'health' ? 0x2fd95f : 0xffd23f;
-    const box = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 1.1),
-      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.9, roughness: 0.4 }));
-    mesh.add(box);
-    const cap = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.3, 0.3),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.6 }));
-    mesh.add(cap);
-    mesh.position.set(p.x, 1.2, p.z);
-    group.add(mesh);
-    pickups.push({ kind, mesh, x: p.x, z: p.z, bob: G.rng() * 6 });
+export function createCombat(scene, random) {
+  return {
+    scene,
+    random,
+    rivals: [],
+    pickups: [],
+    muzzle: 0,
+    tracer: null,
+    shotCooldown: 0,
+  };
+}
+
+function makeRival(scene, x, z) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.95, 0.35), new THREE.MeshStandardMaterial({ color: RIVAL_COLOR, roughness: 0.85 }));
+  body.position.y = 1.0;
+  g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 8, 6), new THREE.MeshStandardMaterial({ color: 0xc9a184, roughness: 0.8 }));
+  head.position.y = 1.68;
+  g.add(head);
+  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.7), new THREE.MeshStandardMaterial({ color: 0x111214 }));
+  gun.position.set(0.3, 1.2, 0.4);
+  g.add(gun);
+  g.position.set(x, 0, z);
+  scene.add(g);
+  return { mesh: g, health: 100, shootTimer: 1 + Math.random() * 2, speed: 2.2, strafe: Math.random() * Math.PI * 2 };
+}
+
+export function spawnRivals(combat, x, z, count) {
+  for (let i = 0; i < count; i++) {
+    combat.rivals.push(makeRival(combat.scene, x + range(combat.random, -14, 14), z + range(combat.random, -14, 14)));
   }
-  for (let i = 0; i < 4; i++) spawnPickup('health');
-  for (let i = 0; i < 4; i++) spawnPickup('ammo');
+}
 
-  function weaponDef() { return WEAPONS[G.state.weapon]; }
-
-  function selectWeapon(key) {
-    const id = key === 'pistol' ? 'pistol' : key === 'smg' ? 'smg' : 'shotgun';
-    if (id === 'smg' && !G.state.ownedWeapons.includes('smg')) {
-      G.hud.toast('Buy the SMG at the weapon shop (B) — $900.');
-      return;
-    }
-    if (id === 'shotgun' && !G.state.ownedWeapons.includes('shotgun')) {
-      G.hud.toast('Buy the Shotgun at the weapon shop (B) — $1,500.');
-      return;
-    }
-    G.state.weapon = id;
-    G.player.setArmed(true);
-    G.hud.toast(`${WEAPONS[id].name} ready.`);
+function spawnPickups(combat) {
+  const kinds = ['health', 'ammo', 'health', 'ammo', 'health', 'ammo', 'health', 'ammo'];
+  for (const kind of kinds) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.9, 0.9, 0.9),
+      new THREE.MeshBasicMaterial({ color: kind === 'health' ? 0x43e06a : 0xffd23f }),
+    );
+    const x = range(combat.random, -260, 260);
+    const z = range(combat.random, -260, 220);
+    mesh.position.set(x, 0.7, z);
+    combat.scene.add(mesh);
+    combat.pickups.push({ mesh, kind, bob: Math.random() * 6 });
   }
+}
 
-  /** Aim direction: the camera yaw when on foot, the car heading when driving. */
-  function aimDir() {
-    if (G.player.inCar) return { x: Math.sin(G.car.heading), z: Math.cos(G.car.heading) };
-    return { x: Math.sin(G.camYaw), z: Math.cos(G.camYaw) };
+export function initPickups(combat) {
+  if (combat.pickups.length === 0) spawnPickups(combat);
+}
+
+/**
+ * Fire the current weapon from the camera. Raycasts against rivals first,
+ * then traffic, police and pedestrians (hitting a pedestrian raises wanted).
+ * Returns true when a shot was fired.
+ */
+export function shoot(state, camera) {
+  const combat = state.combat;
+  if (combat.shotCooldown > 0) return false;
+  const weapon = WEAPONS[state.weapon];
+  if (state.ammo[state.weapon] <= 0) {
+    state.audio.sfx('empty');
+    combat.shotCooldown = 0.25;
+    return false;
   }
-
-  function origin() {
-    return G.player.inCar ? { x: G.car.x, z: G.car.z, y: 1.2 } : { x: G.player.x, z: G.player.z, y: 1.5 };
-  }
-
-  function fire() {
-    if (cooldown > 0 || G.mode !== 'play') return;
-    const def = weaponDef();
-    if (G.state.ammo <= 0) {
-      G.hud.toast('Out of ammo — grab an ammo pickup (yellow box) or buy more (B).');
-      G.audio.click();
-      cooldown = 0.3;
-      return;
-    }
-    cooldown = def.rate;
-    G.state.ammo -= 1;
-    G.audio.gunshot(def.name);
-    const o = origin();
-    const a = aimDir();
-    G.effects.muzzle(o.x + a.x * 1.5, o.y, o.z + a.z * 1.5, a);
-    const pellets = def.pellets || 1;
-    let hitSomething = false;
-    for (let p = 0; p < pellets; p++) {
-      const spread = (G.rng() - 0.5) * 0.12;
-      const ax = a.x + Math.cos(Math.atan2(a.z, a.x)) * spread;
-      const az = a.z - Math.sin(Math.atan2(a.z, a.x)) * spread;
-      // Nearest police patrol in the cone.
-      let best = null;
-      let bestD = def.range;
-      for (const patrol of G.police.patrols) {
-        const dx = patrol.x - o.x;
-        const dz = patrol.z - o.z;
-        const d = Math.hypot(dx, dz);
-        if (d > def.range) continue;
-        const dot = (dx * ax + dz * az) / (d || 1);
-        if (dot > 0.92 && d < bestD) { bestD = d; best = { kind: 'cop', ref: patrol }; }
-      }
-      if (!best) {
-        for (const ped of G.traffic.peds) {
-          const dx = ped.mesh.position.x - o.x;
-          const dz = ped.mesh.position.z - o.z;
-          const d = Math.hypot(dx, dz);
-          if (d > def.range) continue;
-          const dot = (dx * ax + dz * az) / (d || 1);
-          if (dot > 0.92 && d < bestD) { bestD = d; best = { kind: 'ped', ref: ped }; }
+  combat.shotCooldown = weapon.rate;
+  state.ammo[state.weapon] -= 1;
+  state.shotsFired += 1;
+  combat.muzzle = 0.07;
+  state.audio.sfx('shot');
+  const origin = camera.position.clone();
+  const pellets = weapon.pellets ?? 1;
+  let hitRival = false;
+  for (let p = 0; p < pellets; p++) {
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    dir.x += (Math.random() - 0.5) * weapon.spread * 2;
+    dir.y += (Math.random() - 0.5) * weapon.spread * 2;
+    dir.z += (Math.random() - 0.5) * weapon.spread * 2;
+    dir.normalize();
+    const ray = new THREE.Raycaster(origin, dir, 0.5, weapon.range);
+    const targets = [];
+    for (const r of combat.rivals) targets.push(...r.mesh.children);
+    for (const c of state.traffic.cars) targets.push(c.mesh);
+    for (const pc of state.police.cars) targets.push(pc.mesh);
+    const hits = ray.intersectObjects(targets, true);
+    if (hits.length > 0) {
+      const hit = hits[0];
+      let obj = hit.object;
+      while (obj.parent && obj.parent !== state.scene) obj = obj.parent;
+      const rival = combat.rivals.find((r) => r.mesh === obj || r.mesh.children.includes(hit.object));
+      if (rival) {
+        rival.health -= weapon.damage;
+        state.effects.burst(hit.point, 0xff5040, 8);
+        if (rival.health <= 0) {
+          state.scene.remove(rival.mesh);
+          combat.rivals = combat.rivals.filter((r) => r !== rival);
+          state.missions.kills += 1;
+          state.money += 50;
+          state.effects.burst(hit.point, 0xffd23f, 16);
         }
-      }
-      if (best) {
-        hitSomething = true;
-        G.effects.burst(o.x + ax * bestD, 1.2, o.z + az * bestD, 0xff2222, 10);
-        if (best.kind === 'cop') {
-          best.ref.speed = Math.max(0, best.ref.speed - 6);
-          G.police.addWanted(1, 'You shot a cop');
-        } else {
-          // The pedestrian drops and scrambles away.
-          best.ref.pos += 30 * best.ref.dir;
-          G.police.addWanted(2, 'You shot a pedestrian');
-        }
-      }
-    }
-    if (!hitSomething) {
-      G.effects.burst(o.x + a.x * def.range * 0.7, 0.4, o.z + a.z * def.range * 0.7, 0x888888, 4);
-    }
-  }
-
-  function update(dt) {
-    if (cooldown > 0) cooldown -= dt;
-    const p = origin();
-    for (const pk of pickups) {
-      pk.bob += dt;
-      pk.mesh.position.y = 1.2 + Math.sin(pk.bob * 2) * 0.25;
-      pk.mesh.rotation.y += dt * 1.5;
-      if (Math.hypot(p.x - pk.x, p.z - pk.z) < 2.5) {
-        if (pk.kind === 'health') {
-          G.state.health = Math.min(100, G.state.health + 40);
-          G.hud.toast('Health +40');
-        } else {
-          G.state.ammo = Math.min(weaponDef().ammoMax, G.state.ammo + 30);
-          G.hud.toast('Ammo +30');
-        }
-        G.audio.pickup();
-        // Respawn elsewhere.
-        const np = G.world.randomRoadPoint();
-        pk.x = np.x;
-        pk.z = np.z;
-        pk.mesh.position.set(np.x, 1.2, np.z);
+        hitRival = true;
+      } else {
+        state.effects.burst(hit.point, 0xffc93c, 6);
       }
     }
   }
+  // Firing in public draws the law.
+  addWanted(state, 12);
+  if (Math.random() < 0.35) {
+    // A shot rings out: nearby peds flee.
+    for (const ped of state.traffic.peds) {
+      const d = Math.hypot(ped.mesh.position.x - state.player.mesh.position.x, ped.mesh.position.z - state.player.mesh.position.z);
+      if (d < 30) ped.flee = 3;
+    }
+  }
+  return hitRival;
+}
 
-  return { selectWeapon, fire, update, weaponDef };
+/** Rivals advance on the player and shoot back; pickups bob and get collected. */
+export function updateCombat(state, dt) {
+  const combat = state.combat;
+  if (combat.shotCooldown > 0) combat.shotCooldown -= dt;
+  if (combat.muzzle > 0) combat.muzzle -= dt;
+  const playerPos = state.player.mesh.position;
+  for (const rival of [...combat.rivals]) {
+    const dx = playerPos.x - rival.mesh.position.x;
+    const dz = playerPos.z - rival.mesh.position.z;
+    const dist = Math.hypot(dx, dz);
+    rival.mesh.rotation.y = Math.atan2(dx, dz);
+    if (dist > 10) {
+      rival.mesh.position.x += (dx / dist) * rival.speed * dt;
+      rival.mesh.position.z += (dz / dist) * rival.speed * dt;
+    } else {
+      rival.strafe += dt;
+      rival.mesh.position.x += Math.sin(rival.strafe) * 1.2 * dt;
+      rival.mesh.position.z += Math.cos(rival.strafe) * 1.2 * dt;
+    }
+    rival.shootTimer -= dt;
+    if (rival.shootTimer <= 0 && dist < 45) {
+      rival.shootTimer = 1.2 + Math.random() * 1.4;
+      if (Math.random() < 0.55) {
+        state.health = Math.max(0, state.health - (state.armor ? 6 : 12));
+        state.effects.burst(playerPos.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xff4040, 5);
+        state.audio.sfx('hit');
+      }
+    }
+  }
+  for (const pickup of [...combat.pickups]) {
+    pickup.bob += dt;
+    pickup.mesh.position.y = 0.7 + Math.sin(pickup.bob * 2.4) * 0.25;
+    pickup.mesh.rotation.y += dt * 1.5;
+    const d = Math.hypot(pickup.mesh.position.x - playerPos.x, pickup.mesh.position.z - playerPos.z);
+    const inCar = state.playerCar && Math.hypot(pickup.mesh.position.x - state.playerCar.mesh.position.x, pickup.mesh.position.z - state.playerCar.mesh.position.z) < 3;
+    if (d < 2.2 || inCar) {
+      if (pickup.kind === 'health') {
+        state.health = Math.min(100, state.health + 35);
+        state.toast = 'Health +35';
+      } else {
+        state.ammo[state.weapon] += WEAPONS[state.weapon].mag;
+        state.toast = `Ammo +${WEAPONS[state.weapon].mag}`;
+      }
+      state.toastTimer = 2;
+      state.audio.sfx('pickup');
+      state.scene.remove(pickup.mesh);
+      combat.pickups = combat.pickups.filter((p) => p !== pickup);
+    }
+  }
 }
