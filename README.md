@@ -2,58 +2,60 @@
 [![rank](https://make.fun/badge/gta6-01/Mamat9q/solmara-open-city/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/Mamat9q/solmara-open-city/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-# SOLMARA — Open-City Crime
+# SOLMARA — Open City
 
-An original 3D open-world crime game that runs offline in a desktop browser from
-static files. Built for the make.fun competition **gta6-01 — "Make GTA 6"**.
-Everything is original: the city of Solmara, its characters, vehicles, story,
-art and music. No Rockstar names, maps or assets.
+SOLMARA is an original 3D open-world crime game that runs offline in a desktop
+browser from static files. No network requests, no build step: open `game/index.html`
+through any static server and play. Built for make.fun competition **gta6-01**
+("Make GTA 6", $1,666, top 100 paid).
 
-## The game
+You are Mara Voss, a wheelwoman back in the sun-soaked coastal city of Solmara
+with seven days before Hurricane Ilsa makes landfall. Work the streets, outrun
+the Solmara Police Department, and finish the ten-story missions across seven
+chapters before the storm hits.
 
-Hurricane Mara makes landfall in 7 days. You are a driver for hire in Solmara —
-steal cars, outrun the police, and finish **10 story missions across 7 chapters**
-before the storm hits. Then keep playing: taxi fares, street races and delivery
-runs pay for garage upgrades and better weapons.
+## What is in the game
 
-- **City** — 7 named districts (Downtown, Old Town, Eastside, North Hills, Port
-  Solmara, Marina Bay, Sunset Beach), a beachfront, a working port, 190+
-  buildings, traffic (14 cars) and pedestrians (24) with headlights at night.
-- **Driving** — arcade handling (accel 22, drag 0.15), carjacking (E), top speed
-  up to 155+ km/h in the Harbor GT.
-- **Wanted system** — 1–2 stars: patrol cars; 3 stars: roadblocks; 4–5 stars:
-  the AIR-1 helicopter and spike strips. Lay low to cool the heat ("EVADING").
-- **Missions** — 10 story missions with waypoint beacons, objectives and
-  payouts, plus taxi fares (T), 3 race routes (R) and timed deliveries (Y).
-- **Garage (G)** — own 3 cars, buy engine/armor upgrades and 5 paints with
-  mission cash. **Weapon shop (B)** — pistol, SMG, shotgun, ammo, health kits.
-- **Combat** — weapon wheel on keys 1/2/3, hitscan shooting, ammo + health
-  pickups around the city.
-- **Radio (C)** — 3 synth stations (NEON FM, HARBOR JAZZ, STORM ROCK), all
-  synthesized live with WebAudio — no audio files.
-- **Day/night + rain** — a full day cycle, sunset, and rain that wets the
-  streets (glossy sheen, darker sky, heavier storm as the 7 days pass).
-- **HUD + minimap** — cash, respect rank, wanted stars, weapon/ammo, health,
-  radio, speed, mission objective with waypoint distance, and a live minimap
-  showing roads, traffic, police and the waypoint.
-- **Save (K)** — progress autosaves after every mission and loads on start.
+- **Open city, on foot and by car** — 7 named districts (Downtown towers,
+  Beachfront, Port, Marina, Old Town, Suburbs, Industrial), a drivable street
+  grid, beach and harbour, day/night cycle and rain with wet-street reflections.
+- **Driving** — arcade car physics (top speed ~155 km/h), 3 ownable cars in the
+  garage with engine, armour and paint upgrades; steal any traffic car.
+- **Traffic and pedestrians** — 14 traffic cars on road loops with headlights at
+  night, 24 pedestrians who flee from speeding cars and gunfire.
+- **Wanted system and police** — 0–5 stars. Patrol cars at 1–2 stars, roadblocks
+  at 3, the AIR-1 helicopter and spike strips at 4–5, plus a "Lose the cops"
+  evade state when you break line of sight.
+- **Missions and story** — 10 story missions across 7 chapters on a 7-day
+  hurricane countdown, with waypoint beacons, objectives and payouts.
+- **Activities** — taxi fares, 3 street-race routes with checkpoints, delivery
+  runs, shops for weapons and health, ammo and health pickups.
+- **Combat** — weapon wheel (pistol / SMG / shotgun), rival gang shootouts,
+  muzzle flash and hit particles.
+- **HUD and minimap** — cash, respect rank, wanted stars, health, ammo, speed,
+  radio station, mission objective, day/clock and hurricane countdown, plus a
+  live minimap with police, traffic and mission blips.
+- **Audio** — 3 synth radio stations, engine hum, sirens, gunshots and pickup
+  sounds, all synthesised live with WebAudio. No audio files.
+- **Save / load** — progress, cash, cars, upgrades and mission state persist in
+  the browser (localStorage), with Continue on the start screen.
 
 ## Controls
 
 | Key | Action |
 | --- | --- |
 | W A S D / arrows | Drive / walk |
-| Mouse | Look (drag, or pointer lock on click) |
-| E | Enter car / steal a nearby car / exit car |
+| Shift | Run / handbrake |
+| Space | Jump (on foot) / brake |
+| E | Enter / exit car (steal nearest car) |
+| Mouse | Look (click the game to lock the pointer) |
 | Click | Shoot |
-| 1 / 2 / 3 | Pistol / SMG / shotgun |
-| M | Start next story mission |
-| T / R / Y | Taxi fare / street race / delivery run |
-| G | Garage — cars, upgrades, paint |
-| B | Weapon shop |
-| C | Switch radio station |
-| K | Save game |
+| 1 / 2 / 3 | Pistol / SMG / Shotgun |
+| R | Cycle radio station |
+| M | Toggle mission list |
 | P / Esc | Pause |
+| F | Start nearest activity (taxi / race / delivery) |
+| H | Horn |
 
 ## Play it
 
@@ -62,18 +64,21 @@ node serve.ts
 # open http://localhost:8080
 ```
 
-No build step, no network requests, no install. three.js r187 is vendored under
-`game/vendor/`. The game is ES modules under `game/src/`, one file per system:
-`world`, `player`, `vehicles`, `traffic`, `police`, `missions`, `combat`, `hud`,
-`audio`, `save`, `input`, `effects`, `main`, `shop`, `hurricane`, `shots`.
+Or serve `game/` with any static file server and open `game/index.html`.
 
-## Hand it in
+## Screenshots
 
-```sh
-mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-# prints "SOLMARA handed in" and writes out/dossier.json
-```
+`?shot=start`, `?shot=drive`, `?shot=chase` and `?shot=mission` (with
+`&seed=1`) stage the four screenshot scenes deterministically.
 
-## License
+## Tech
 
-MIT — see `LICENSE`.
+- three.js r187, vendored under `game/vendor/` (ES modules, no network)
+- Node 22 program `main.ts` hands the game in with the kit's
+  `vendor/makefun-game.ts` dossier builder
+- MIT licensed — see `LICENSE`
+
+## Entry
+
+Repository: https://github.com/Mamat9q/solmara-open-city — competition
+[gta6-01](https://make.fun/bounty/gta6-01). Entries close 24 Nov 2026 15:00 UTC.
