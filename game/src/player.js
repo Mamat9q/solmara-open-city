@@ -1,94 +1,106 @@
-// Mara Voss on foot: a simple third-person walker with a chase camera that
-// also frames the car. Camera pitch comes from the mouse when the pointer is
-// locked; arrow keys nudge it otherwise. Entering a car hides the walker.
+// The player on foot: a simple articulated figure (capsule body, head, arms,
+// legs that swing while walking), third-person camera, enter/exit cars with E.
 import * as THREE from 'three';
-import { PLAYER_WALK, PLAYER_RUN, CITY_HALF } from './config.js';
+import { CFG } from './config.js';
+import { clamp } from './random.js';
 
-export function createPlayer(scene) {
+export function makePersonMesh(shirt = 0x3a6fd9, pants = 0x222630) {
   const g = new THREE.Group();
-  const jacket = new THREE.MeshStandardMaterial({ color: 0xff5d7a, roughness: 0.8 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.35), jacket);
-  body.position.y = 1.0;
+  const skin = new THREE.MeshStandardMaterial({ color: 0xd9a066, roughness: 0.8 });
+  const shirtMat = new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.85 });
+  const pantsMat = new THREE.MeshStandardMaterial({ color: pants, roughness: 0.9 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.7, 4, 8), shirtMat);
+  body.position.y = 1.05;
   g.add(body);
-  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.3), new THREE.MeshStandardMaterial({ color: 0x1e2430, roughness: 0.9 }));
-  legs.position.y = 0.35;
-  g.add(legs);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), new THREE.MeshStandardMaterial({ color: 0xd9a986, roughness: 0.8 }));
-  head.position.y = 1.7;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 10), skin);
+  head.position.y = 1.78;
   g.add(head);
-  const hair = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.2, 0.5), new THREE.MeshStandardMaterial({ color: 0x14100c, roughness: 1 }));
-  hair.position.y = 1.88;
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.27, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: 0x1a1210, roughness: 1 }));
+  hair.position.y = 1.82;
   g.add(hair);
-  g.position.set(0, 0, 40);
-  scene.add(g);
-  return {
-    mesh: g,
-    heading: 0,
-    camYaw: 0,
-    camPitch: 0.32,
-    onFoot: true,
-    speed: 0,
-    vy: 0,
-    grounded: true,
-  };
-}
-
-/**
- * On-foot step. `drive` is the input direction, `look` the mouse delta,
- * `cam` the camera to place. Returns nothing; the walker moves relative to the
- * camera yaw so W always runs away from the camera.
- */
-export function updatePlayerOnFoot(player, drive, look, dt, camera) {
-  player.camYaw -= look.x * 0.0032;
-  player.camPitch = THREE.MathUtils.clamp(player.camPitch + look.y * 0.0024, 0.08, 1.1);
-  const speed = drive.run ? PLAYER_RUN : PLAYER_WALK;
-  const sin = Math.sin(player.camYaw);
-  const cos = Math.cos(player.camYaw);
-  let mx = 0; let mz = 0;
-  if (drive.forward !== 0) { mx += -sin * drive.forward; mz += -cos * drive.forward; }
-  if (drive.steer !== 0) { mx += -cos * drive.steer; mz += sin * drive.steer; }
-  const len = Math.hypot(mx, mz);
-  if (len > 0) {
-    mx /= len; mz /= len;
-    player.mesh.position.x += mx * speed * dt;
-    player.mesh.position.z += mz * speed * dt;
-    player.heading = Math.atan2(mx, mz);
-    player.mesh.rotation.y = player.heading;
-    player.speed = speed;
-    // Walk bob.
-    player.mesh.children[0].position.y = 1.0 + Math.abs(Math.sin(performance.now() * 0.014)) * 0.05;
-  } else {
-    player.speed = 0;
+  const limbs = [];
+  for (const [x, y, len, mat] of [[-0.42, 1.35, 0.62, skin], [0.42, 1.35, 0.62, skin], [-0.18, 0.62, 0.6, pantsMat], [0.18, 0.62, 0.6, pantsMat]]) {
+    const limb = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, len, 6), mat);
+    limb.position.set(x, y, 0);
+    limb.geometry.translate(0, -len / 2, 0);
+    g.add(limb);
+    limbs.push(limb);
   }
-  player.mesh.position.x = THREE.MathUtils.clamp(player.mesh.position.x, -CITY_HALF + 4, CITY_HALF - 4);
-  player.mesh.position.z = THREE.MathUtils.clamp(player.mesh.position.z, -CITY_HALF + 4, CITY_HALF - 4);
-  // Simple jump.
-  if (player.grounded && drive.jump) { player.vy = 6.5; player.grounded = false; }
-  if (!player.grounded) {
-    player.vy -= 18 * dt;
-    player.mesh.position.y += player.vy * dt;
-    if (player.mesh.position.y <= 0) { player.mesh.position.y = 0; player.vy = 0; player.grounded = true; }
+  g.userData.limbs = limbs;
+  return g;
+}
+
+export class Player {
+  constructor(scene) {
+    this.mesh = makePersonMesh();
+    scene.add(this.mesh);
+    this.x = 0;
+    this.z = 0;
+    this.heading = 0;
+    this.speed = 0;
+    this.inCar = null;
+    this.health = 100;
+    this.walkPhase = 0;
+    this.visible = true;
   }
-  placeCamera(camera, player.mesh.position, player.camYaw, player.camPitch, 7, 2.2);
-}
 
-export function placeCamera(camera, target, yaw, pitch, dist, height) {
-  const cx = target.x + Math.sin(yaw) * Math.cos(pitch) * dist;
-  const cz = target.z + Math.cos(yaw) * Math.cos(pitch) * dist;
-  const cy = target.y + height + Math.sin(pitch) * dist;
-  camera.position.set(cx, Math.max(1.2, cy), cz);
-  camera.lookAt(target.x, target.y + 1.4, target.z);
-}
+  place(x, z, heading) {
+    this.x = x;
+    this.z = z;
+    this.heading = heading;
+    this.mesh.position.set(x, 0, z);
+    this.mesh.rotation.y = heading;
+  }
 
-/** Chase camera behind the car, smoothing toward the car's heading. */
-export function updateCarCamera(camera, car, dt) {
-  const back = car.heading + Math.PI;
-  const dist = 9.5;
-  const tx = car.mesh.position.x + Math.sin(back) * dist;
-  const tz = car.mesh.position.z + Math.cos(back) * dist;
-  const k = Math.min(1, dt * 5);
-  camera.position.x += (tx - camera.position.x) * k;
-  camera.position.y += (3.4 - camera.position.y) * k;
-  camera.position.z += (tz - camera.position.z) * k;
-  camera.lookAt(car.mesh.position.x, 1.4, car.mesh.position.z);
+  // move: {x: -1..1 strafe, z: -1..1 forward} in camera space; yaw from mouse.
+  update(dt, move, yawDelta, collide) {
+    if (this.inCar) return;
+    this.heading -= yawDelta * 0.0022;
+    const want = Math.hypot(move.x, move.z);
+    const target = want > 0.1 ? (move.z > 0.5 ? CFG.player.runSpeed : CFG.player.walkSpeed) : 0;
+    this.speed += (target - this.speed) * Math.min(1, dt * 10);
+    if (this.speed > 0.05) {
+      const a = this.heading + Math.atan2(move.x, move.z);
+      this.x += Math.sin(a) * this.speed * dt;
+      this.z += Math.cos(a) * this.speed * dt;
+      this.walkPhase += dt * this.speed * 1.9;
+    }
+    if (collide) {
+      const p = collide(this.x, this.z, 0.55);
+      this.x = p.x;
+      this.z = p.z;
+    }
+    this.mesh.position.set(this.x, 0, this.z);
+    this.mesh.rotation.y = this.heading;
+    const swing = Math.sin(this.walkPhase) * clamp(this.speed / CFG.player.runSpeed, 0, 1) * 0.7;
+    const limbs = this.mesh.userData.limbs;
+    limbs[0].rotation.x = swing;
+    limbs[1].rotation.x = -swing;
+    limbs[2].rotation.x = -swing;
+    limbs[3].rotation.x = swing;
+  }
+
+  enterCar(car) {
+    this.inCar = car;
+    this.mesh.visible = false;
+  }
+
+  exitCar() {
+    if (!this.inCar) return null;
+    const car = this.inCar;
+    this.inCar = null;
+    this.x = car.x - Math.sin(car.heading + Math.PI / 2) * 2.4;
+    this.z = car.z - Math.cos(car.heading + Math.PI / 2) * 2.4;
+    this.heading = car.heading;
+    this.mesh.visible = true;
+    this.mesh.position.set(this.x, 0, this.z);
+    this.mesh.rotation.y = this.heading;
+    return car;
+  }
+
+  pos() {
+    if (this.inCar) return { x: this.inCar.x, z: this.inCar.z, heading: this.inCar.heading, speed: this.inCar.speed };
+    return { x: this.x, z: this.z, heading: this.heading, speed: this.speed };
+  }
 }

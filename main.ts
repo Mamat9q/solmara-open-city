@@ -1,14 +1,9 @@
-// SOLMARA — hand-in program for make.fun gta6-01 (Node 22, standard library only).
-// The game is plain static files under game/ (game/index.html plus its ES modules,
-// three.js vendored under game/vendor/, no network request) and the screenshots
-// under screenshots/ are real renders of the game. This program copies both into
-// /output (or MAKEFUN_OUTPUT_DIR outside the grader) and writes /output/dossier.json
-// with the vendored make.fun library, which the sealed scorer re-derives and
-// compares byte for byte. It runs twice in grading and must write identical bytes.
-//
+// SOLMARA — the program that hands the game in (Node 22, standard library
+// only). It copies game/ and screenshots/ from beside this file to /output
+// and writes /output/dossier.json with the vendored make.fun library, the
+// summary the judge reads. Outside the grader's container,
+// MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-//   node serve.ts   (then open http://localhost:8080 to play)
-
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,9 +21,8 @@ if (existsSync(join(here, 'screenshots'))) {
 
 // The scorer's own caps (reference/gate.json): only text_max_bytes shapes the
 // bytes; the others refuse an entry the scorer would refuse (more than 4
-// screenshots or one over 256 KiB; more than 993 entries in game/ or 48 MiB of
-// game files in all, or a path under game/ over 1000 bytes; game/ counts beside
-// /output's own 1000-entry cap, its screenshots/ and dossier.json).
+// screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of
+// game files in all, or a path under game/ over 1000 bytes).
 writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, {

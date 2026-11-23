@@ -1,166 +1,145 @@
-// The story: 10 missions across 7 chapters on the hurricane countdown.
-// A mission is a list of steps — goto, steal, kill, race, taxi, evade — each
-// with a beacon, an objective line and a payout at the end. Finishing one pays
-// cash, adds respect and advances the day; finishing all ten beats the game.
-import { MISSIONS, RACES, GARAGE_POS } from './config.js';
-import { addWanted } from './police.js';
-import { spawnRivals } from './combat.js';
+// Story missions: 10 jobs across 7 chapters. Each mission is a small state
+// machine — drive to a marker, run taxi fares, win a race route, deliver, or
+// escape a wanted level — with a payout and respect on completion.
+import * as THREE from 'three';
+import { MISSIONS, RACE_A, RACE_B } from './config.js';
 
-export function createMissions() {
-  return {
-    index: 0,
-    step: 0,
-    active: false,
-    done: 0,
-    race: null,
-    kills: 0,
-    taxiDone: false,
-    completed: new Set(),
-  };
-}
-
-export function missionTitle(missions) {
-  const m = MISSIONS[missions.index];
-  return m ? m.title : 'All missions complete';
-}
-
-export function currentStep(missions) {
-  const m = MISSIONS[missions.index];
-  if (!m) return null;
-  return m.steps[missions.step] ?? null;
-}
-
-export function startMission(missions, index, state) {
-  const m = MISSIONS[index];
-  if (!m) return false;
-  missions.index = index;
-  missions.step = 0;
-  missions.active = true;
-  missions.race = null;
-  missions.kills = 0;
-  missions.taxiDone = false;
-  state.day = Math.max(state.day, m.day);
-  const step = currentStep(missions);
-  if (step && step.type === 'kill') {
-    spawnRivals(state.combat, step.x, step.z, step.count);
+export class MissionSys {
+  constructor(game) {
+    this.game = game;
+    this.current = null; // {def, step, fares, checkpoint, timer, ...}
+    this.done = new Set();
+    this.marker = null;
+    this.markerRing = null;
+    this.markerLight = null;
   }
-  if (step && step.type === 'evade' && step.wanted) {
-    state.wantedHeat = 55;
-    addWanted(state, 0);
-    state.wanted = 3;
-  }
-  return true;
-}
 
-function advance(missions, state) {
-  missions.step += 1;
-  const m = MISSIONS[missions.index];
-  const step = currentStep(missions);
-  if (!step) {
-    completeMission(missions, state);
-    return;
+  list() {
+    return MISSIONS.map((m) => ({ ...m, done: this.done.has(m.id) }));
   }
-  if (step.type === 'kill') spawnRivals(state.combat, step.x, step.z, step.count);
-  if (step.type === 'evade' && step.wanted) {
-    state.wantedHeat = 55;
-    state.wanted = 3;
+
+  start(id) {
+    const def = MISSIONS.find((m) => m.id === id);
+    if (!def || this.done.has(id)) return false;
+    this.current = {
+      def,
+      step: 0,
+      fares: 0,
+      checkpoint: 0,
+      timer: 0,
+      raceRoute: def.type === 'race' ? (def.id === 4 ? RACE_A : RACE_B) : null,
+      laps: 0,
+    };
+    this.showMarker(def.target[0], def.target[1]);
+    this.game.hud.message(`Mission: ${def.name} — ${def.brief}`);
+    if (def.type === 'escape') this.game.police.addWanted(def.id === 6 ? 3 : 5);
+    if (def.type === 'race') this.showMarker(this.current.raceRoute[0][0], this.current.raceRoute[0][1]);
+    return true;
   }
-}
 
-function completeMission(missions, state) {
-  const m = MISSIONS[missions.index];
-  missions.active = false;
-  missions.completed.add(missions.index);
-  missions.done += 1;
-  state.money += m.payout;
-  state.respect = Math.min(100, state.respect + 8);
-  state.day = Math.min(7, m.day + 1);
-  state.toast = `Mission complete: ${m.title} — $${m.payout}`;
-  state.toastTimer = 4;
-  state.audio.sfx('mission');
-  state.save();
-  if (missions.index + 1 < MISSIONS.length) {
-    missions.index += 1;
-  } else {
-    state.gameWon = true;
+  showMarker(x, z) {
+    this.hideMarker();
+    const geo = new THREE.CylinderGeometry(4, 4, 0.4, 24);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.7 });
+    this.marker = new THREE.Mesh(geo, mat);
+    this.marker.position.set(x, 0.3, z);
+    this.game.scene.add(this.marker);
+    const ringGeo = new THREE.TorusGeometry(4, 0.25, 8, 32);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffd24a });
+    this.markerRing = new THREE.Mesh(ringGeo, ringMat);
+    this.markerRing.rotation.x = Math.PI / 2;
+    this.markerRing.position.set(x, 0.5, z);
+    this.game.scene.add(this.markerRing);
   }
-}
 
-/**
- * Mission step checks, run every frame. `pos` is the player's position.
- * Returns nothing; completing a step advances or pays out.
- */
-export function updateMissions(missions, state, dt) {
-  if (!missions.active) return;
-  const step = currentStep(missions);
-  if (!step) return;
-  const pos = state.playerCar ? state.playerCar.mesh.position : state.player.mesh.position;
-  const distTo = (x, z) => Math.hypot(pos.x - x, pos.z - z);
-
-  if (step.type === 'goto' || step.type === 'pickup') {
-    state.world.setBeacon(step.x, step.z, true);
-    state.objective = step.text;
-    if (distTo(step.x, step.z) < 7) {
-      state.audio.sfx('pickup');
-      advance(missions, state);
+  hideMarker() {
+    if (this.marker) {
+      this.game.scene.remove(this.marker);
+      this.marker = null;
     }
-    return;
-  }
-  if (step.type === 'steal') {
-    state.world.setBeacon(GARAGE_POS.x, GARAGE_POS.z, false);
-    state.objective = step.text;
-    if (state.playerCar && state.playerCar.stolen) advance(missions, state);
-    return;
-  }
-  if (step.type === 'kill') {
-    state.world.setBeacon(step.x, step.z, true);
-    state.objective = `${step.text} — ${missions.kills}/${step.count} down`;
-    if (missions.kills >= step.count) advance(missions, state);
-    return;
-  }
-  if (step.type === 'race') {
-    const race = RACES[step.route];
-    if (!missions.race) {
-      missions.race = { route: step.route, cp: 0, started: false };
-      state.race = missions.race;
+    if (this.markerRing) {
+      this.game.scene.remove(this.markerRing);
+      this.markerRing = null;
     }
-    const cp = race.points[missions.race.cp];
-    state.world.setBeacon(cp[0], cp[1], true);
-    state.objective = `${step.text} — checkpoint ${missions.race.cp + 1}/${race.points.length}`;
-    if (distTo(cp[0], cp[1]) < 9) {
-      missions.race.cp += 1;
-      state.audio.sfx('pickup');
-      if (missions.race.cp >= race.points.length) {
-        state.race = null;
-        advance(missions, state);
+  }
+
+  markerPos() {
+    if (!this.current) return null;
+    if (this.current.def.type === 'race') {
+      const cp = this.current.raceRoute[this.current.checkpoint % this.current.raceRoute.length];
+      return { x: cp[0], z: cp[1] };
+    }
+    return { x: this.current.def.target[0], z: this.current.def.target[1] };
+  }
+
+  complete() {
+    const m = this.current;
+    if (!m) return;
+    this.done.add(m.def.id);
+    this.game.state.cash += m.def.payout;
+    this.game.state.respect += 10 + m.def.chapter * 2;
+    this.game.hud.message(`Mission complete: ${m.def.name} — +$${m.def.payout}`);
+    this.game.audio.pickup();
+    this.game.saveGame();
+    this.current = null;
+    this.hideMarker();
+  }
+
+  fail(reason) {
+    if (!this.current) return;
+    this.game.hud.message(`Mission failed: ${reason}`);
+    this.current = null;
+    this.hideMarker();
+  }
+
+  // Called when a taxi fare finishes.
+  fareDone() {
+    if (!this.current || this.current.def.type !== 'taxi') return;
+    this.current.fares += 1;
+    this.game.state.cash += 60;
+    this.game.hud.message(`Fare ${this.current.fares}/2 complete — +$60`);
+    if (this.current.fares >= 2) this.complete();
+  }
+
+  update(dt, playerPos) {
+    if (this.markerRing) this.markerRing.rotation.z += dt * 1.5;
+    const m = this.current;
+    if (!m) return;
+    m.timer += dt;
+    const target = this.markerPos();
+    if (!target) return;
+    const d2 = (playerPos.x - target.x) ** 2 + (playerPos.z - target.z) ** 2;
+    const near = d2 < 8 * 8;
+    switch (m.def.type) {
+      case 'drive':
+      case 'deliver':
+        if (near) this.complete();
+        break;
+      case 'escape':
+        if (near && this.game.police.wanted === 0) this.complete();
+        else if (m.timer > 240) this.fail('took too long');
+        break;
+      case 'race': {
+        if (near) {
+          m.checkpoint += 1;
+          this.game.audio.pickup();
+          if (m.checkpoint >= m.raceRoute.length) {
+            m.laps += 1;
+            m.checkpoint = 0;
+            this.game.hud.message(`Lap ${m.laps}/3`);
+            if (m.laps >= 3) this.complete();
+          }
+          const next = this.markerPos();
+          this.showMarker(next.x, next.z);
+        }
+        if (m.timer > 420) this.fail('race timed out');
+        break;
       }
+      case 'taxi':
+        if (m.timer > 300) this.fail('the passengers gave up');
+        break;
+      default:
+        break;
     }
-    return;
   }
-  if (step.type === 'taxi') {
-    state.world.setBeacon(state.taxiRider ? state.taxiRider.x : 80, state.taxiRider ? state.taxiRider.z : 80, true);
-    state.objective = step.text;
-    if (missions.taxiDone) advance(missions, state);
-    return;
-  }
-  if (step.type === 'evade') {
-    state.world.setBeacon(0, 0, false);
-    if (step.wanted && state.wanted >= step.wanted && !missions.evadeSeen) {
-      missions.evadeSeen = true;
-    }
-    state.objective = state.wanted > 0 ? 'Lose the cops — break line of sight' : step.text;
-    if (state.wanted === 0 && (missions.evadeSeen || !step.wanted)) {
-      missions.evadeSeen = false;
-      advance(missions, state);
-    }
-    return;
-  }
-  state.world.setBeacon(0, 0, false);
-}
-
-/** Start the next uncompleted mission, or resume the active one. */
-export function startNextMission(missions, state) {
-  if (missions.active) return true;
-  if (missions.index >= MISSIONS.length) return false;
-  return startMission(missions, missions.index, state);
 }

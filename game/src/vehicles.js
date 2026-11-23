@@ -1,90 +1,131 @@
-// Cars: a boxy low-poly build (body, cabin, wheels, headlights) and arcade
-// physics — accel 22, drag 0.15, top speed ~43 m/s (155 km/h). Steering bites
-// harder at low speed and washes out at high speed, like a street car should.
+// Cars: a simple arcade physics model (accel 22, drag 0.15, tuned headless)
+// and a low-poly car mesh built from boxes, with spinning wheels, brake
+// lights and headlights. One class serves the player, traffic and police.
 import * as THREE from 'three';
-import { CAR_ACCEL, CAR_DRAG, CAR_TOP_SPEED, CAR_STEER, CITY_HALF } from './config.js';
+import { CFG } from './config.js';
+import { clamp, angleDiff } from './random.js';
 
-const WHEEL_GEO = new THREE.BoxGeometry(0.55, 0.55, 0.9);
-const WHEEL_MAT = new THREE.MeshStandardMaterial({ color: 0x111214, roughness: 0.9 });
-
-export function createCarMesh(color, kind = 'sedan') {
-  const car = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.2 });
-  const glassMat = new THREE.MeshStandardMaterial({ color: 0x101826, roughness: 0.15, metalness: 0.8 });
-  const bodyLen = kind === 'truck' ? 5.6 : 4.4;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.75, bodyLen), bodyMat);
+export function makeCarMesh(colorHex, opts = {}) {
+  const g = new THREE.Group();
+  const paint = new THREE.MeshStandardMaterial({
+    color: colorHex, roughness: 0.35, metalness: 0.55,
+  });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x11131a, roughness: 0.2, metalness: 0.4 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.62, 4.4), paint);
   body.position.y = 0.62;
-  car.add(body);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.65, kind === 'truck' ? 1.6 : 2.2), glassMat);
-  cabin.position.set(0, 1.3, kind === 'truck' ? -0.4 : -0.2);
-  car.add(cabin);
+  g.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.58, 2.2), dark);
+  cabin.position.set(0, 1.18, -0.25);
+  g.add(cabin);
+  const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 12);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.9 });
   const wheels = [];
   for (const [x, z] of [[-0.95, 1.45], [0.95, 1.45], [-0.95, -1.45], [0.95, -1.45]]) {
-    const w = new THREE.Mesh(WHEEL_GEO, WHEEL_MAT);
-    w.position.set(x, 0.28, z);
-    car.add(w);
+    const w = new THREE.Mesh(wheelGeo, wheelMat);
+    w.rotation.z = Math.PI / 2;
+    w.position.set(x, 0.38, z);
+    g.add(w);
     wheels.push(w);
   }
-  const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
-  for (const x of [-0.6, 0.6]) {
-    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.18, 0.1), lightMat);
-    lamp.position.set(x, 0.7, bodyLen / 2 + 0.02);
-    car.add(lamp);
+  const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
+  for (const x of [-0.7, 0.7]) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.08), tailMat);
+    t.position.set(x, 0.72, -2.22);
+    g.add(t);
   }
-  const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
-  for (const x of [-0.6, 0.6]) {
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.18, 0.1), tailMat);
-    tail.position.set(x, 0.7, -bodyLen / 2 - 0.02);
-    car.add(tail);
+  const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2c0 });
+  for (const x of [-0.7, 0.7]) {
+    const h = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.08), headMat);
+    h.position.set(x, 0.72, 2.22);
+    g.add(h);
   }
-  car.userData = { bodyMat, wheels, kind, bodyLen };
-  return car;
+  if (opts.taxi) {
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.28, 0.5),
+      new THREE.MeshBasicMaterial({ color: 0xf2c200 }));
+    sign.position.set(0, 1.62, -0.25);
+    g.add(sign);
+  }
+  if (opts.police) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.16, 0.4),
+      new THREE.MeshBasicMaterial({ color: 0x2244ff }));
+    bar.position.set(0, 1.55, -0.25);
+    g.add(bar);
+    g.userData.lightbar = bar;
+  }
+  g.userData.wheels = wheels;
+  return g;
 }
 
-/** A drivable car entity: mesh plus speed, heading and tuning. */
-export function createCarEntity(mesh, tuning) {
-  return {
-    mesh,
-    speed: 0,
-    heading: 0,
-    accel: tuning.accel,
-    top: tuning.top,
-    color: tuning.color,
-    damaged: 0,
-    spikeSlow: 0,
-  };
-}
-
-/**
- * Arcade drive step. `drive` is {forward:-1..1, steer:-1..1, run} (run = handbrake).
- * Returns the distance travelled this step.
- */
-export function updateCarPhysics(car, drive, dt) {
-  const effTop = car.top * (car.spikeSlow > 0 ? 0.35 : 1);
-  if (drive.forward !== 0) {
-    car.speed += drive.forward * car.accel * dt * (car.speed < 0 && drive.forward > 0 ? 2.2 : 1);
+export class Car {
+  constructor(scene, def, colorHex, opts = {}) {
+    this.def = def;
+    this.mesh = makeCarMesh(colorHex, opts);
+    this.wheels = this.mesh.userData.wheels;
+    scene.add(this.mesh);
+    this.x = 0;
+    this.z = 0;
+    this.heading = 0;
+    this.speed = 0;
+    this.steer = 0;
+    this.top = def.top || 38;
+    this.accel = def.accel || CFG.car.accel;
+    this.armor = 0;
+    this.engineLevel = 0;
+    this.dead = false;
+    this.spin = 0;
   }
-  // Drag + rolling resistance; handbrake cuts speed hard and lets the tail out.
-  car.speed -= car.speed * CAR_DRAG * dt * 3;
-  if (drive.run) car.speed -= car.speed * 2.4 * dt;
-  if (Math.abs(car.speed) < 0.05 && drive.forward === 0) car.speed = 0;
-  car.speed = Math.max(-12, Math.min(effTop, car.speed));
-  const steerAuthority = CAR_STEER * (1 - Math.min(0.55, Math.abs(car.speed) / effTop * 0.55));
-  car.heading += drive.steer * steerAuthority * (car.speed / Math.max(8, Math.abs(car.speed))) * dt * Math.sign(car.speed || 1) * (drive.run ? 1.6 : 1);
-  const dx = Math.sin(car.heading) * car.speed * dt;
-  const dz = Math.cos(car.heading) * car.speed * dt;
-  car.mesh.position.x = THREE.MathUtils.clamp(car.mesh.position.x + dx, -CITY_HALF + 6, CITY_HALF - 6);
-  car.mesh.position.z = THREE.MathUtils.clamp(car.mesh.position.z + dz, -CITY_HALF + 6, CITY_HALF - 6);
-  car.mesh.rotation.y = car.heading;
-  // Wheel spin + a little body roll for feel.
-  const spin = car.speed * dt * 1.4;
-  for (const w of car.mesh.userData.wheels) w.rotation.x += spin;
-  car.mesh.rotation.z = -drive.steer * Math.min(0.06, Math.abs(car.speed) * 0.0015);
-  if (car.spikeSlow > 0) car.spikeSlow = Math.max(0, car.spikeSlow - dt);
-  return Math.abs(car.speed) * dt;
-}
 
-/** Speed in km/h for the HUD. */
-export function kmh(car) {
-  return Math.round(Math.abs(car.speed) * 3.6);
+  place(x, z, heading) {
+    this.x = x;
+    this.z = z;
+    this.heading = heading;
+    this.speed = 0;
+    this.sync();
+  }
+
+  sync() {
+    this.mesh.position.set(this.x, 0, this.z);
+    this.mesh.rotation.y = this.heading;
+    for (const w of this.wheels) w.rotation.x += this.speed * 0.016 * 2.6;
+  }
+
+  // controls: {throttle 0..1, brake 0..1, reverse bool, steer -1..1, handbrake 0..1}
+  update(dt, controls, collide) {
+    const top = this.top * (1 + this.engineLevel * 0.12);
+    const accel = this.accel * (1 + this.engineLevel * 0.15);
+    if (controls.throttle > 0) this.speed += accel * dt;
+    if (controls.reverse) {
+      if (this.speed > 0.5) this.speed -= CFG.car.brake * dt;
+      else this.speed -= accel * 0.55 * dt;
+    }
+    if (controls.brake > 0) this.speed -= CFG.car.brake * dt;
+    if (controls.handbrake > 0) this.speed *= Math.max(0, 1 - 3.2 * dt);
+    // Quadratic drag keeps the top speed honest.
+    this.speed -= this.speed * Math.abs(this.speed) * CFG.car.drag * dt * 0.12;
+    this.speed = clamp(this.speed, -12, top);
+    if (Math.abs(this.speed) < 0.05 && controls.throttle === 0) this.speed = 0;
+    const targetSteer = clamp(controls.steer, -1, 1) * CFG.car.steerMax;
+    this.steer += (targetSteer - this.steer) * Math.min(1, dt * 8);
+    const turn = this.steer * clamp(Math.abs(this.speed) / 8, 0, 1) * (this.speed >= 0 ? 1 : -1);
+    this.heading += turn * dt * 1.9;
+    this.x += Math.sin(this.heading) * this.speed * dt;
+    this.z += Math.cos(this.heading) * this.speed * dt;
+    if (collide) {
+      const p = collide(this.x, this.z, 2.1);
+      this.x = p.x;
+      this.z = p.z;
+    }
+    this.sync();
+  }
+
+  // Simple chase steering toward a target point (used by traffic + police).
+  steerToward(tx, tz, throttle = 1) {
+    const want = Math.atan2(tx - this.x, tz - this.z);
+    const dh = angleDiff(this.heading, want);
+    return { throttle, brake: 0, reverse: false, steer: clamp(dh * 2.4, -1, 1), handbrake: 0 };
+  }
+
+  kmh() {
+    return Math.abs(this.speed) * 3.6;
+  }
 }

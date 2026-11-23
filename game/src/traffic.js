@@ -1,135 +1,101 @@
-// Traffic and pedestrians: 14 cars looping the road grid with headlights at
-// night, and 24 walkers on the sidewalks. Traffic brakes for the car ahead and
-// for the player; pedestrians wander, then flee from speeding cars and gunfire.
+// Ambient life: 14 traffic cars cruising the road grid and 24 pedestrians on
+// the sidewalks, with headlights after dark. Traffic cars follow the grid,
+// stop briefly at random, and never leave the roads.
 import * as THREE from 'three';
-import { CITY_HALF, ROAD_STEP } from './config.js';
-import { createCarMesh } from './vehicles.js';
-import { range, pick } from './random.js';
+import { CFG } from './config.js';
+import { makeRng, clamp } from './random.js';
+import { Car, makeCarMesh } from './vehicles.js';
+import { makePersonMesh } from './player.js';
+import { nearestRoadPoint } from './world.js';
 
-const TRAFFIC_COLORS = [0xd8d8d8, 0x2a2f38, 0x7a2a2a, 0x2a4a7a, 0x4a6b2a, 0xc2a23c, 0x6b4a8a];
-const PED_COLORS = [0xe05a4e, 0x4e8ae0, 0x5ac25a, 0xe0c04e, 0xb06ad9, 0xdddddd, 0x333333];
+const TRAFFIC_COLORS = [0xc0c0c0, 0x8a2be2, 0x2e8b57, 0xd2691e, 0x4682b4, 0xb22222, 0xf5f5dc];
 
-function roadLoopPoints(random) {
-  // A rectangular loop on the grid: pick two avenues and two streets.
-  const xs = [-240, -160, -80, 0, 80, 160, 240];
-  const x0 = pick(random, xs); let x1 = pick(random, xs);
-  if (x1 === x0) x1 = x0 + 80;
-  const z0 = pick(random, xs); let z1 = pick(random, xs);
-  if (z1 === z0) z1 = z0 + 80;
-  return [
-    { x: x0, z: z0 }, { x: x1, z: z0 }, { x: x1, z: z1 }, { x: x0, z: z1 },
-  ];
-}
-
-export function createTraffic(scene, random) {
-  const cars = [];
-  for (let i = 0; i < 14; i++) {
-    const mesh = createCarMesh(pick(random, TRAFFIC_COLORS), random() < 0.2 ? 'truck' : 'sedan');
-    const route = roadLoopPoints(random);
-    const start = route[Math.floor(random() * route.length)];
-    mesh.position.set(start.x + range(random, -4, 4), 0, start.z + range(random, -4, 4));
-    scene.add(mesh);
-    cars.push({
-      mesh, route, leg: 0, speed: range(random, 8, 13), cruise: range(random, 8, 13),
-      stopped: 0, kind: 'traffic',
-    });
-  }
-
-  const peds = [];
-  const pedBodyGeo = new THREE.BoxGeometry(0.55, 1.1, 0.35);
-  const pedHeadGeo = new THREE.SphereGeometry(0.22, 8, 6);
-  for (let i = 0; i < 24; i++) {
-    const g = new THREE.Group();
-    const mat = new THREE.MeshStandardMaterial({ color: pick(random, PED_COLORS), roughness: 0.9 });
-    const body = new THREE.Mesh(pedBodyGeo, mat);
-    body.position.y = 0.85;
-    g.add(body);
-    const head = new THREE.Mesh(pedHeadGeo, new THREE.MeshStandardMaterial({ color: 0xd9a986, roughness: 0.8 }));
-    head.position.y = 1.6;
-    g.add(head);
-    const x = range(random, -280, 280);
-    const z = range(random, -280, 230);
-    g.position.set(x, 0, z);
-    scene.add(g);
-    peds.push({
-      mesh: g, heading: random() * Math.PI * 2, speed: range(random, 0.8, 1.6),
-      target: null, flee: 0, wander: random() * 4,
-    });
-  }
-  return { cars, peds };
-}
-
-function nearestAhead(car, others, playerCar) {
-  // Anything within 9 m ahead on roughly the same heading slows this car.
-  const fx = Math.sin(car.mesh.rotation.y);
-  const fz = Math.cos(car.mesh.rotation.y);
-  let nearest = Infinity;
-  const check = (x, z) => {
-    const dx = x - car.mesh.position.x;
-    const dz = z - car.mesh.position.z;
-    const ahead = dx * fx + dz * fz;
-    const side = Math.abs(dx * fz - dz * fx);
-    if (ahead > 0 && ahead < 10 && side < 2.6) nearest = Math.min(nearest, ahead);
-  };
-  for (const o of others) if (o !== car) check(o.mesh.position.x, o.mesh.position.z);
-  if (playerCar) check(playerCar.mesh.position.x, playerCar.mesh.position.z);
-  return nearest;
-}
-
-export function updateTraffic(state, dt, night) {
-  const { cars, peds } = state.traffic;
-  for (const car of cars) {
-    const target = car.route[(car.leg + 1) % car.route.length];
-    const dx = target.x - car.mesh.position.x;
-    const dz = target.z - car.mesh.position.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist < 3) { car.leg = (car.leg + 1) % car.route.length; continue; }
-    const want = Math.atan2(dx, dz);
-    let diff = want - car.mesh.rotation.y;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    car.mesh.rotation.y += THREE.MathUtils.clamp(diff, -1.4 * dt, 1.4 * dt);
-    const blocked = nearestAhead(car, cars, state.playerCar);
-    const speed = blocked < Infinity ? Math.max(0, car.cruise * (blocked / 10)) : car.cruise;
-    car.speed += (speed - car.speed) * Math.min(1, dt * 2);
-    car.mesh.position.x += Math.sin(car.mesh.rotation.y) * car.speed * dt;
-    car.mesh.position.z += Math.cos(car.mesh.rotation.y) * car.speed * dt;
-    // Headlights: brighten the lamp boxes at night (cheap: scale emissive via material is shared, so skip).
-  }
-  for (const ped of peds) {
-    ped.wander -= dt;
-    if (ped.flee > 0) ped.flee -= dt;
-    const playerPos = state.player.mesh.position;
-    const dPlayer = Math.hypot(ped.mesh.position.x - playerPos.x, ped.mesh.position.z - playerPos.z);
-    const danger = state.playerCar && Math.abs(state.playerCar.speed) > 12
-      ? Math.hypot(ped.mesh.position.x - state.playerCar.mesh.position.x, ped.mesh.position.z - state.playerCar.mesh.position.z) < 14
-      : false;
-    if ((dPlayer < 6 && state.shotsFired > 0) || danger) ped.flee = 2.5;
-    if (ped.wander <= 0) {
-      ped.heading = Math.random() * Math.PI * 2;
-      ped.wander = 2 + Math.random() * 4;
+export class Traffic {
+  constructor(scene, world, seed = 7) {
+    this.scene = scene;
+    this.world = world;
+    this.rng = makeRng(seed);
+    this.cars = [];
+    this.peds = [];
+    for (let i = 0; i < CFG.trafficCount; i++) {
+      const car = new Car(scene, { top: 14, accel: 9 }, TRAFFIC_COLORS[i % TRAFFIC_COLORS.length]);
+      const gx = this.rng.int(-4, 4) * 60;
+      const gz = this.rng.int(-4, 4) * 60;
+      const alongX = this.rng.chance(0.5);
+      car.place(alongX ? gx : gx + this.rng.range(-20, 20), alongX ? gz + this.rng.range(-20, 20) : gz, alongX ? Math.PI / 2 : 0);
+      car.cruise = 9 + this.rng.range(0, 5);
+      car.wait = 0;
+      car.dir = this.rng.chance(0.5) ? 1 : -1;
+      this.cars.push(car);
     }
-    const speed = ped.flee > 0 ? 4.2 : ped.speed;
-    if (ped.flee > 0) {
-      // Run away from the player.
-      ped.heading = Math.atan2(ped.mesh.position.x - playerPos.x, ped.mesh.position.z - playerPos.z);
+    for (let i = 0; i < CFG.pedCount; i++) {
+      const mesh = makePersonMesh(
+        [0x3a6fd9, 0xd94a6a, 0x4ad97a, 0xd9a03a, 0x7a4ad9][i % 5],
+        0x2a2e38,
+      );
+      scene.add(mesh);
+      const gx = this.rng.int(-4, 4) * 60 + this.rng.range(-25, 25);
+      const gz = this.rng.int(-4, 4) * 60 + this.rng.range(-25, 25);
+      this.peds.push({
+        mesh,
+        x: gx,
+        z: gz,
+        heading: this.rng.next() * Math.PI * 2,
+        speed: this.rng.range(0.9, 1.8),
+        phase: this.rng.next() * 6,
+        turnAt: this.rng.range(2, 9),
+      });
     }
-    ped.mesh.position.x += Math.sin(ped.heading) * speed * dt;
-    ped.mesh.position.z += Math.cos(ped.heading) * speed * dt;
-    ped.mesh.position.x = THREE.MathUtils.clamp(ped.mesh.position.x, -CITY_HALF + 4, CITY_HALF - 4);
-    ped.mesh.position.z = THREE.MathUtils.clamp(ped.mesh.position.z, -CITY_HALF + 4, 240);
-    ped.mesh.rotation.y = ped.heading;
-    // Simple walk bob.
-    ped.mesh.children[0].position.y = 0.85 + Math.abs(Math.sin(state.time * 8 + ped.speed * 20)) * 0.06;
   }
-}
 
-/** The nearest traffic car to a point, within `maxDist`. */
-export function nearestTrafficCar(traffic, x, z, maxDist) {
-  let best = null; let bestD = maxDist;
-  for (const car of traffic.cars) {
-    const d = Math.hypot(car.mesh.position.x - x, car.mesh.position.z - z);
-    if (d < bestD) { bestD = d; best = car; }
+  update(dt, night) {
+    for (const car of this.cars) {
+      if (car.wait > 0) {
+        car.wait -= dt;
+        car.update(dt, { throttle: 0, brake: 1, reverse: false, steer: 0, handbrake: 0 }, null);
+        continue;
+      }
+      if (this.rng.chance(dt * 0.02)) car.wait = this.rng.range(1, 3);
+      // Steer along the grid: pick the nearest road line and follow it.
+      const p = nearestRoadPoint(car.x, car.z);
+      const tx = Math.abs(car.x - p.x) < 2 ? car.x + Math.sin(car.heading) * 30 * car.dir : p.x;
+      const tz = Math.abs(car.z - p.z) < 2 ? car.z + Math.cos(car.heading) * 30 * car.dir : p.z;
+      const ctrl = car.steerToward(tx, tz, 0.5);
+      car.speed = Math.min(car.speed, car.cruise);
+      car.update(dt, ctrl, (x, z, r) => this.world.collide(x, z, r));
+    }
+    for (const p of this.peds) {
+      p.turnAt -= dt;
+      if (p.turnAt <= 0) {
+        p.heading += this.rng.range(-1.2, 1.2);
+        p.turnAt = this.rng.range(2, 9);
+      }
+      p.x += Math.sin(p.heading) * p.speed * dt;
+      p.z += Math.cos(p.heading) * p.speed * dt;
+      if (Math.abs(p.x) > 290 || Math.abs(p.z) > 290) p.heading += Math.PI;
+      p.phase += dt * p.speed * 3;
+      p.mesh.position.set(p.x, 0, p.z);
+      p.mesh.rotation.y = p.heading;
+      const swing = Math.sin(p.phase) * 0.5;
+      const limbs = p.mesh.userData.limbs;
+      limbs[0].rotation.x = swing;
+      limbs[1].rotation.x = -swing;
+      limbs[2].rotation.x = -swing;
+      limbs[3].rotation.x = swing;
+    }
+    void night;
   }
-  return best;
+
+  nearestCar(x, z, maxDist = 6) {
+    let best = null;
+    let bd = maxDist * maxDist;
+    for (const car of this.cars) {
+      const d2 = (car.x - x) ** 2 + (car.z - z) ** 2;
+      if (d2 < bd) {
+        bd = d2;
+        best = car;
+      }
+    }
+    return best;
+  }
 }
